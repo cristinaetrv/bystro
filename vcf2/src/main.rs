@@ -416,8 +416,8 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
 }
 
 fn write_samples_type(
-    header: &Vec<Vec<u8>>,
-    samples: &Vec<u32>,
+    header: &[Vec<u8>],
+    samples: &[u32],
     n_samples: f32,
     buffer: &mut Vec<u8>,
     f_buf: &mut [u8; 15],
@@ -469,11 +469,11 @@ fn write_f32(buffer: &mut Vec<u8>, val: f32, f_buf: &mut [u8; 15]) {
 }
 
 fn write_samples(
-    header: &Vec<Vec<u8>>,
+    header: &[Vec<u8>],
     buffer: &mut Vec<u8>,
-    hets: &Vec<u32>,
-    homs: &Vec<u32>,
-    missing_buffer: &Vec<u8>,
+    hets: &[u32],
+    homs: &[u32],
+    missing_buffer: &[u8],
     effective_samples: f32,
     ac: u32,
     an: u32,
@@ -506,7 +506,7 @@ fn write_chrom(buffer: &mut Vec<u8>, chrom: &[u8]) {
     buffer.extend_from_slice(&chrom);
 }
 
-fn process_lines(header: &Vec<Vec<u8>>, rows: Vec<Vec<u8>>) -> usize {
+fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
     let n_samples = header.len() - 9;
 
     let mut homs: Vec<Vec<u32>> = Vec::new();
@@ -759,7 +759,7 @@ fn process_lines(header: &Vec<Vec<u8>>, rows: Vec<Vec<u8>>) -> usize {
                     continue;
                 }
 
-                write_chrom(&mut buffer, &chrom);
+                // write_chrom(&mut buffer, &chrom);
                 buffer.push(b'\t');
 
                 buffer.extend_from_slice(pos);
@@ -862,7 +862,6 @@ fn process_lines(header: &Vec<Vec<u8>>, rows: Vec<Vec<u8>>) -> usize {
 
 fn main() -> Result<(), std::io::Error> {
     let (s1, r1) = unbounded();
-    let (s2, r2) = unbounded();
     let n_cpus = num_cpus::get();
 
     let stdin = io::stdin();
@@ -875,7 +874,7 @@ fn main() -> Result<(), std::io::Error> {
     let header: Arc<Vec<Vec<u8>>> = Arc::new(
         get_header(&mut stdin_lock)
             .split(|b| *b == b'\t')
-            .map(|sample| Vec::from(sample))
+            .map(|sample| sample.to_vec())
             .collect(),
     );
 
@@ -883,24 +882,26 @@ fn main() -> Result<(), std::io::Error> {
         info!("Found 9 header fields. When genotypes present, we expect 1+ samples after FORMAT (10 fields minimum)")
     }
 
+    let mut threads = vec![];
+
     for _i in 0..n_cpus {
         let r = r1.clone();
-        let s = s2.clone();
         let header = Arc::clone(&header);
 
-        thread::spawn(move || {
+        threads.push(thread::spawn(move || {
             let mut n_count: usize = 0;
 
             loop {
-                let message = match r.recv() {
+                let message: Vec<Vec<u8>> = match r.recv() {
                     Ok(v) => v,
                     Err(_) => break,
                 };
 
-                n_count += process_lines(&header, message);
+                n_count += process_lines(&header, &message);
             }
-            s.send(n_count).unwrap();
-        });
+
+            n_count
+        }));
     }
 
     let max_lines = 32;
@@ -925,15 +926,10 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     drop(s1);
-    let mut total = 0;
-    let mut thread_completed = 0;
-    loop {
-        thread_completed += 1;
-        total += r2.recv().unwrap();
 
-        if thread_completed == n_cpus {
-            break;
-        }
+    let mut total = 0;
+    for thread in threads {
+        total += thread.join().unwrap();
     }
 
     assert_eq!(total, n_count);
