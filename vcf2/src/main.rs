@@ -759,7 +759,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                     continue;
                 }
 
-                // write_chrom(&mut buffer, &chrom);
+                write_chrom(&mut buffer, &chrom);
                 buffer.push(b'\t');
 
                 buffer.extend_from_slice(pos);
