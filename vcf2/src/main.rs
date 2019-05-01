@@ -577,6 +577,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
                 alleles = get_alleles(pos, refr, alt);
 
+                // TODO: This isn't quite right
                 match &alleles {
                     VariantEnum::Multi(v) => {
                         found_ac = v.3.len();
@@ -674,6 +675,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                     // Currently we're counting against an
                     // Count genotype? no?
 
+                    // TODO: Double check this logic
                     if gtn.0 > found_ac {
                         continue;
                     }
@@ -708,6 +710,40 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
         }
 
         match alleles {
+            VariantEnum::Snp(v) => {
+                let (pos, refr, alt) = v;
+
+                if n_samples > 0 && ac[0] == 0 {
+                    continue;
+                }
+
+                write_chrom(&mut buffer, &chrom);
+                buffer.push(b'\t');
+
+                buffer.extend_from_slice(pos);
+                buffer.push(b'\t');
+                buffer.extend_from_slice(SNP);
+                buffer.push(b'\t');
+                buffer.push(refr);
+                buffer.push(b'\t');
+                buffer.push(alt);
+                buffer.push(b'\t');
+                buffer.push(TSTV[refr as usize][alt as usize]);
+                buffer.push(b'\t');
+
+                write_samples(
+                    header,
+                    &mut buffer,
+                    &hets[0],
+                    &homs[0],
+                    &missing_buffer,
+                    effective_samples,
+                    ac[0],
+                    an,
+                    &mut bytes,
+                    &mut f_buf,
+                );
+            }
             VariantEnum::Multi(v) => {
                 let (site_type, t_pos, t_refr, t_alt) = v;
 
@@ -751,40 +787,6 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                         &mut f_buf,
                     );
                 }
-            }
-            VariantEnum::Snp(v) => {
-                let (pos, refr, alt) = v;
-
-                if n_samples > 0 && ac[0] == 0 {
-                    continue;
-                }
-
-                write_chrom(&mut buffer, &chrom);
-                buffer.push(b'\t');
-
-                buffer.extend_from_slice(pos);
-                buffer.push(b'\t');
-                buffer.extend_from_slice(SNP);
-                buffer.push(b'\t');
-                buffer.push(refr);
-                buffer.push(b'\t');
-                buffer.push(alt);
-                buffer.push(b'\t');
-                buffer.push(TSTV[refr as usize][alt as usize]);
-                buffer.push(b'\t');
-
-                write_samples(
-                    header,
-                    &mut buffer,
-                    &hets[0],
-                    &homs[0],
-                    &missing_buffer,
-                    effective_samples,
-                    ac[0],
-                    an,
-                    &mut bytes,
-                    &mut f_buf,
-                );
             }
             VariantEnum::Del(v) => {
                 let (pos, refr, alt) = v;
@@ -862,7 +864,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
 fn main() -> Result<(), std::io::Error> {
     let (s1, r1) = unbounded();
-    let n_cpus = num_cpus::get();
+    let n_cpus = num_cpus::get() - 1;
 
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
