@@ -903,6 +903,7 @@ fn main() -> Result<(), std::io::Error> {
         });
     }
 
+    let max_lines = 32;
     loop {
         let mut buf: Vec<u8> = Vec::new();
         len = stdin_lock.read_until(0xA, &mut buf)?;
@@ -917,9 +918,9 @@ fn main() -> Result<(), std::io::Error> {
         lines.push(buf);
         n_count += 1;
 
-        if lines.len() > 64 {
+        if lines.len() > max_lines {
             s1.send(lines).unwrap();
-            lines = Vec::with_capacity(64);
+            lines = Vec::with_capacity(max_lines);
         }
     }
 
