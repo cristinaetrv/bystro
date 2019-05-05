@@ -524,7 +524,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
     let mut missing: Vec<u32> = Vec::new();
     let mut ac: Vec<u32> = Vec::new();
     let mut ac_temp_count: Vec<u8>;
-    let mut an_temp_count: u8 = 0;
+    let mut an_temp_count: u8;
     // let mut genotype_cache: HashMap<&[u8], (Vec<u8>)>;
     let mut an: u32 = 0;
 
@@ -610,12 +610,11 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 }
 
                 an = 0;
-                an_temp_count = 0;
+                ac = vec![0; allele_num];
 
                 missing.clear();
                 hets = vec![Vec::new(); allele_num];
                 homs = vec![Vec::new(); allele_num];
-                ac = vec![0; allele_num];
 
                 continue;
             }
@@ -657,6 +656,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                         // }
 
                         ac_temp_count = vec![0; allele_nums.len()];
+                        an_temp_count = 0;
 
                         for gt in gt_range.split(|byt| *byt == b'|' || *byt == b'/') {
                             an_temp_count += 1;
@@ -722,9 +722,13 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                             continue;
                         }
 
-                        // field[2] == 1 since non-multiallelic
-                        ac[0] += 1;
+                        if field[0] == b'1' && field[2] == b'1' {
+                            ac[0] += 2;
+                            homs[0].push(idx as u32);
+                            continue;
+                        }
 
+                        ac[0] += 1;
                         hets[0].push(idx as u32);
                     }
                 }
