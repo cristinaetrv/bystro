@@ -1,5 +1,6 @@
 // TODO: replace panics with proper error handling
 // TODO: Cache genotypes
+use std::borrow::Cow;
 use std::io;
 use std::io::prelude::*;
 use std::thread;
@@ -128,7 +129,7 @@ fn filter_passes(
 type SnpType<'a> = (&'a [u8], u8, u8);
 type DelType = (u32, u8, i32);
 type InsType<'a> = (&'a [u8], u8, &'a [u8]);
-type Multi<'a> = (&'a [u8], Vec<u32>, Vec<u8>, Vec<Vec<u8>>, Vec<u32>);
+type Multi<'a> = (&'a [u8], Vec<u32>, Vec<u8>, Vec<Cow<'a, [u8]>>, Vec<u32>);
 
 enum VariantEnum<'a> {
     Snp(SnpType<'a>),
@@ -176,7 +177,7 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
 
     let mut positions: Vec<u32> = Vec::new();
     let mut references: Vec<u8> = Vec::new();
-    let mut alleles: Vec<Vec<u8>> = Vec::new();
+    let mut alleles: Vec<Cow<'a, [u8]>> = Vec::new();
     let mut alt_nums: Vec<u32> = Vec::new();
 
     let pos = u32::from_radix_10(pos).0;
@@ -203,7 +204,7 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
             if t_alt.len() == 1 {
                 positions.push(pos);
                 references.push(refr[0]);
-                alleles.push(t_alt.to_vec());
+                alleles.push(Cow::Borrowed(t_alt));
                 alt_nums.push(n_alleles);
 
                 continue;
@@ -222,7 +223,7 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
             let mut ins = Vec::new();
             ins.push(b'+');
             ins.extend_from_slice(&t_alt[1..t_alt.len()]);
-            alleles.push(ins);
+            alleles.push(Cow::Owned(ins));
             alt_nums.push(n_alleles);
 
             continue;
@@ -242,9 +243,9 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
             references.push(refr[1]);
 
             // TODO: error handling/log
-            let mut allele = Vec::new();
-            itoa::write(&mut allele, 1 - refr.len() as i32).unwrap();
-            alleles.push(allele);
+            let mut del = Vec::new();
+            itoa::write(&mut del, 1 - refr.len() as i32).unwrap();
+            alleles.push(Cow::Owned(del));
             alt_nums.push(n_alleles);
 
             continue;
@@ -261,7 +262,7 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
                 if refr[i] != t_alt[i] {
                     positions.push(pos + i as u32);
                     references.push(refr[i]);
-                    alleles.push(vec![t_alt[i]; 1]);
+                    alleles.push(Cow::Borrowed(&t_alt[i..i + 1]));
                     alt_nums.push(n_alleles);
                 }
             }
@@ -355,7 +356,7 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
             let mut ins = Vec::new();
             ins.push(b'+');
             ins.extend_from_slice(&t_alt[offset..{ talt_len + r_idx } as usize]);
-            alleles.push(ins);
+            alleles.push(Cow::Owned(ins));
             alt_nums.push(n_alleles);
 
             continue;
@@ -386,9 +387,9 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
         // we want the base after the last shared
         references.push(refr[offset]);
 
-        let mut allele = Vec::new();
-        itoa::write(&mut allele, -(refr_len + r_idx - offset as i32)).unwrap();
-        alleles.push(allele);
+        let mut del = Vec::new();
+        itoa::write(&mut del, -(refr_len + r_idx - offset as i32)).unwrap();
+        alleles.push(Cow::Owned(del));
         alt_nums.push(n_alleles);
     }
 
@@ -624,14 +625,11 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 continue;
             }
 
+            // TODO: Handle haploid genomes
             if idx > FORMAT_IDX {
                 match &alleles {
                     VariantEnum::Multi((_, _, _, _, allele_nums)) => {
-                        // TODO: check that it has '/' || '\'
-                        if field[0] == b'0'
-                            && field[2] == b'0'
-                            && (field[1] == b'|' || field[1] == b'/')
-                        {
+                        if field.len() >= 3 && field[0] == b'0' && field[2] == b'0' {
                             an += 2;
                             continue;
                         }
@@ -659,6 +657,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                         an_temp_count = 0;
 
                         for gt in gt_range.split(|byt| *byt == b'|' || *byt == b'/') {
+                            // println!("GT : {}", std::str::from_utf8(gt).unwrap());
                             an_temp_count += 1;
 
                             if gt[0] == b'0' {
@@ -710,26 +709,49 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                         }
                     }
                     _ => {
-                        if field[0] == b'.' || field[2] == b'.' {
-                            missing.push(idx as u32);
+                        if field.len() == 1 {
+                            if field[0] == b'0' {
+                                an += 1;
+                            } else if field[2] == b'1' {
+                                an += 1;
+                                ac[0] += 1;
+                                homs[0].push(idx as u32);
+                            } else {
+                                missing.push(idx as u32);
+                            }
+
                             continue;
                         }
 
-                        an += 2;
+                        if field[0] == b'0' {
+                            if field[2] == b'0' {
+                                an += 2;
+                            } else if field[2] == b'1' {
+                                an += 2;
+                                ac[0] += 1;
+                                hets[0].push(idx as u32);
+                            } else {
+                                missing.push(idx as u32);
+                            }
 
-                        // TODO: check that it has '/' || '\'
-                        if field[0] == b'0' && field[2] == b'0' {
                             continue;
                         }
 
-                        if field[0] == b'1' && field[2] == b'1' {
-                            ac[0] += 2;
-                            homs[0].push(idx as u32);
+                        if field[0] == b'1' {
+                            if field[2] == b'0' {
+                                an += 2;
+                                ac[0] += 1;
+                                hets[0].push(idx as u32);
+                            } else if field[2] == b'1' {
+                                an += 2;
+                                ac[0] += 2;
+                                homs[0].push(idx as u32);
+                            } else {
+                                missing.push(idx as u32);
+                            }
+
                             continue;
                         }
-
-                        ac[0] += 1;
-                        hets[0].push(idx as u32);
                     }
                 }
             }
