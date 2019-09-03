@@ -1,6 +1,5 @@
 // TODO: replace panics with proper error handling
 // TODO: Cache genotypes
-use std::borrow::Cow;
 use std::io;
 use std::io::prelude::*;
 use std::thread;
@@ -37,6 +36,15 @@ const DEL: &[u8] = b"DEL";
 const MNP: &[u8] = b"MNP";
 const MULTI: &[u8] = b"MULTIALLELIC";
 
+// const site_types: &[[u8]] = [SNP, INS, DEL, MNP, MULTI];
+const SITE_TYPES: [&[u8]; 5] = [SNP, INS, DEL, MNP, MULTI];
+
+const SNP_IDX: u8 = 0;
+const INS_IDX: u8 = 1;
+const DEL_IDX: u8 = 2;
+const MNP_IDX: u8 = 3;
+const MULTI_IDX: u8 = 4;
+
 const A: u8 = b'A';
 const C: u8 = b'C';
 const G: u8 = b'G';
@@ -63,11 +71,10 @@ static TSTV: [[u8; 256]; 256] = {
     all
 };
 
-// #[inline]
-// fn tstv(u8) {
-
+// fn get_output_header() -> Vec<Vec<u8>> {
+//     vec![b"chrom", b"pos", b"type", b"ref", b"alt", b"trTv", b"heterozygotes", b"heterozygosity", b"homozygotes",
+//         b"homozygosity", b"missingGenos", b"missingness", b"ac", b"an", b"sampleMaf"]
 // }
-
 // TODO: Add error handling
 fn get_header<T: BufRead>(reader: &mut T) -> Vec<u8> {
     let mut line: String = String::with_capacity(10_000);
@@ -100,7 +107,7 @@ fn get_header<T: BufRead>(reader: &mut T) -> Vec<u8> {
 
 #[inline(always)]
 fn snp_is_valid(alt: u8) -> bool {
-    return alt == b'A' || alt == b'G' || alt == b'C' || alt == b'T';
+    alt == b'A' || alt == b'G' || alt == b'C' || alt == b'T'
 }
 
 fn alt_is_valid(alt: &[u8]) -> bool {
@@ -117,6 +124,7 @@ fn alt_is_valid(alt: &[u8]) -> bool {
     true
 }
 
+#[inline(always)]
 fn filter_passes(
     filter_field: &[u8],
     allowed_filters: &HashMap<&[u8], bool>,
@@ -126,16 +134,42 @@ fn filter_passes(
         && (excluded_filters.len() == 0 || !excluded_filters.contains_key(filter_field))
 }
 
+// type MNPType<'a> =
 type SnpType<'a> = (&'a [u8], u8, u8);
 type DelType = (u32, u8, i32);
 type InsType<'a> = (&'a [u8], u8, &'a [u8]);
-type Multi<'a> = (&'a [u8], Vec<u32>, Vec<u8>, Vec<Cow<'a, [u8]>>, Vec<u32>);
+// return VariantEnum::Multi((SNP_INDEX, positions, references, alleles, alt_nums));
+type Complex<'a> = (u8, Vec<AlleleTypes>);
 
+#[derive(Debug, Copy, Clone)]
+struct SNPVariantBlock {
+    reference: u8, // the character in bytes
+    alternate: u8,
+    position: u32,
+}
+
+#[derive(Debug)]
+struct IndelVariantBlock {
+    reference: u8, // the character in bytes
+    position: u32,
+    alternate: Vec<u8>,
+}
+
+#[derive(Debug)]
+enum AlleleTypes {
+    SNP(SNPVariantBlock),
+    DEL(IndelVariantBlock),
+    INS(IndelVariantBlock),
+    MNP(Vec<SNPVariantBlock>),
+    None,
+}
+
+#[derive(Debug)]
 enum VariantEnum<'a> {
     Snp(SnpType<'a>),
     Del(DelType),
     Ins(InsType<'a>),
-    Multi(Multi<'a>),
+    Complex(Complex<'a>),
     None,
 }
 
@@ -161,24 +195,20 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
         // example: alt = A (len == 1), ref = AAATCC (len == 6)
         // 1 - 6 = -5 (then conver to string)
         let pos = u32::from_radix_10(pos).0 + 1;
-
-        return VariantEnum::Del((pos, refr[0], 1 - refr.len() as i32));
+        return VariantEnum::Del((pos, refr[1], 1 - refr.len() as i32));
     } else if refr.len() == 1 && memchr(b',', alt) == None {
         if !alt_is_valid(alt) {
             return VariantEnum::None;
         }
 
-        if alt[0] == refr[0] {
+        if alt[0] != refr[0] {
             return VariantEnum::None;
         }
 
         return VariantEnum::Ins((pos, refr[0], &alt[1..alt.len()]));
     }
 
-    let mut positions: Vec<u32> = Vec::new();
-    let mut references: Vec<u8> = Vec::new();
-    let mut alleles: Vec<Cow<'a, [u8]>> = Vec::new();
-    let mut alt_nums: Vec<u32> = Vec::new();
+    let mut variants: Vec<AlleleTypes> = Vec::new();
 
     let pos = u32::from_radix_10(pos).0;
 
@@ -187,66 +217,67 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
         return VariantEnum::None;
     }
 
-    let mut n_alleles: u32 = 0;
+    let mut n_valid_alleles: u32 = 0;
     let refr_len = refr.len() as i32;
     let mut r_idx: i32;
     let mut talt_len: i32;
 
     for t_alt in alt.split(|byt| *byt == b',') {
-        n_alleles += 1;
-
         if !alt_is_valid(t_alt) {
+            variants.push(AlleleTypes::None);
             continue;
         }
 
         if refr.len() == 1 {
-            // Just a SNP in a multiallelic
-            if t_alt.len() == 1 {
-                positions.push(pos);
-                references.push(refr[0]);
-                alleles.push(Cow::Borrowed(t_alt));
-                alt_nums.push(n_alleles);
-
-                continue;
-            }
-
-            // A complex INS
             if t_alt[0] != refr[0] {
+                // TODO: grab chromosome in message, store number skipped
+                // eprint!("{:?}: skipping: first base of ref didn't match alt: {:?}, {:?}", pos, t_alt, refr);
+                variants.push(AlleleTypes::None);
                 continue;
             }
 
-            // A simple INS
-            // Pos doesn't change, as pos refers to first ref base
-            positions.push(pos);
-            references.push(refr[0]);
+            if t_alt.len() == 1 {
+                variants.push(AlleleTypes::SNP(SNPVariantBlock {
+                    position: pos,
+                    reference: refr[0],
+                    alternate: t_alt[0],
+                }));
+                n_valid_alleles += 1;
+                continue;
+            }
 
+            // Pos doesn't change, as pos in output refers to first ref base
             let mut ins = Vec::new();
             ins.push(b'+');
             ins.extend_from_slice(&t_alt[1..t_alt.len()]);
-            alleles.push(Cow::Owned(ins));
-            alt_nums.push(n_alleles);
+
+            variants.push(AlleleTypes::INS(IndelVariantBlock {
+                position: pos,
+                reference: refr[0],
+                alternate: ins,
+            }));
+            n_valid_alleles += 1;
 
             continue;
         }
 
-        //Simple deletion
         if alt.len() == 1 {
-            // complex deletion, but most likely error
             if t_alt[0] != refr[0] {
                 // TODO: log
+                variants.push(AlleleTypes::None);
                 continue;
             }
 
             // We use 0 padding for deletions, showing 1st deleted base as ref
             // Therefore need to shift pos & ref by 1
-            positions.push(pos + 1);
-            references.push(refr[1]);
-
-            // TODO: error handling/log
             let mut del = Vec::new();
             itoa::write(&mut del, 1 - refr.len() as i32).unwrap();
-            alleles.push(Cow::Owned(del));
-            alt_nums.push(n_alleles);
+            variants.push(AlleleTypes::DEL(IndelVariantBlock {
+                position: pos + 1,
+                reference: refr[1],
+                alternate: del,
+            }));
+            n_valid_alleles += 1;
 
             continue;
         }
@@ -255,16 +286,33 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
         // could be a weird SNP (multiple bases are SNPS, len(ref) == len(alt))
         // could be a weird deletion/insertion
         // could be a completely normal multiallelic (due to padding, shifted)
+        // We return these as VariantEnum::Multiallelic but if it proves to be a snp, mnp, ins, or del
+        // we label it as such
 
         //1st check for MNPs and extra-padding SNPs
         if refr.len() == t_alt.len() {
+            let mut mnp_alleles: Vec<SNPVariantBlock> = Vec::with_capacity(t_alt.len());
             for i in 0..refr.len() {
                 if refr[i] != t_alt[i] {
-                    positions.push(pos + i as u32);
-                    references.push(refr[i]);
-                    alleles.push(Cow::Borrowed(&t_alt[i..i + 1]));
-                    alt_nums.push(n_alleles);
+                    mnp_alleles.push(SNPVariantBlock {
+                        position: pos + i as u32,
+                        reference: refr[i],
+                        alternate: t_alt[i],
+                    })
                 }
+            }
+
+            if mnp_alleles.len() == 0 {
+                variants.push(AlleleTypes::None);
+                continue;
+            }
+
+            if mnp_alleles.len() == 1 {
+                variants.push(AlleleTypes::SNP(mnp_alleles[0]));
+                n_valid_alleles += 1;
+            } else {
+                variants.push(AlleleTypes::MNP(mnp_alleles));
+                n_valid_alleles += 1;
             }
 
             continue;
@@ -346,9 +394,6 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
             // we require remainder of left edge to be present,
             // or len(ref) - 1 == 2
             // so intPos + 2 - 1 for last padding base (the A in TA) (intPos + 2 is first unique base)
-            positions.push(pos + offset as u32 - 1);
-
-            references.push(refr[offset - 1]);
 
             // Similarly, the alt allele starts from len(ref) + rIdx, and ends at len(tAlt) + rIdx
             // from ex: TAGCTT ref: TAT :
@@ -356,8 +401,13 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
             let mut ins = Vec::new();
             ins.push(b'+');
             ins.extend_from_slice(&t_alt[offset..{ talt_len + r_idx } as usize]);
-            alleles.push(Cow::Owned(ins));
-            alt_nums.push(n_alleles);
+
+            variants.push(AlleleTypes::INS(IndelVariantBlock {
+                position: pos + offset as u32 - 1,
+                reference: refr[offset - 1],
+                alternate: ins,
+            }));
+            n_valid_alleles += 1;
 
             continue;
         }
@@ -383,22 +433,23 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
 
         offset = { talt_len + r_idx } as usize;
 
-        positions.push(pos + offset as u32);
-        // we want the base after the last shared
-        references.push(refr[offset]);
-
         let mut del = Vec::new();
         itoa::write(&mut del, -(refr_len + r_idx - offset as i32)).unwrap();
-        alleles.push(Cow::Owned(del));
-        alt_nums.push(n_alleles);
+        // reference: we want the base after the last shared
+        variants.push(AlleleTypes::DEL(IndelVariantBlock {
+            position: pos + offset as u32,
+            reference: refr[offset],
+            alternate: del,
+        }));
+        n_valid_alleles += 1;
     }
 
-    if alleles.len() == 0 {
+    if n_valid_alleles == 0 {
         return VariantEnum::None;
     }
 
-    if n_alleles > 1 {
-        return VariantEnum::Multi((MULTI, positions, references, alleles, alt_nums));
+    if variants.len() > 1 {
+        return VariantEnum::Complex((MULTI_IDX, variants));
     }
 
     // A single allele
@@ -409,19 +460,13 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> VariantEnum<
     // > 1, these are labeled differently to allow people to jointly consider the effects
     // of the array of SNPs, since we at the moment consider their effects only independently
     // (which has advantages for CADD, phyloP, phastCons, clinvar, etc reporting)
-    if alleles.len() > 1 {
-        return VariantEnum::Multi((MNP, positions, references, alleles, alt_nums));
+    match variants[0] {
+        AlleleTypes::SNP(_) => VariantEnum::Complex((SNP_IDX, variants)),
+        AlleleTypes::INS(_) => VariantEnum::Complex((INS_IDX, variants)),
+        AlleleTypes::DEL(_) => VariantEnum::Complex((DEL_IDX, variants)),
+        AlleleTypes::MNP(_) => VariantEnum::Complex((MNP_IDX, variants)),
+        AlleleTypes::None => VariantEnum::None,
     }
-
-    if alleles[0].len() > 1 {
-        if alleles[0][0] == b'-' {
-            return VariantEnum::Multi((DEL, positions, references, alleles, alt_nums));
-        }
-
-        return VariantEnum::Multi((INS, positions, references, alleles, alt_nums));
-    }
-
-    panic!("WTF");
 }
 
 fn write_samples_type(
@@ -431,7 +476,7 @@ fn write_samples_type(
     buffer: &mut Vec<u8>,
     f_buf: &mut [u8; 15],
 ) {
-    if samples.len() == 0 {
+    if samples.is_empty() {
         buffer.push(b'!');
         buffer.push(b'\t');
         buffer.push(b'0');
@@ -477,33 +522,54 @@ fn write_f32(buffer: &mut Vec<u8>, val: f32, f_buf: &mut [u8; 15]) {
     };
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_samples(
     header: &[Vec<u8>],
     buffer: &mut Vec<u8>,
     hets: &[u32],
     homs: &[u32],
-    missing_buffer: &[u8],
+    missing: &[u32],
     effective_samples: f32,
+    n_samples: u32,
     ac: u32,
     an: u32,
     bytes: &mut Vec<u8>,
     f_buf: &mut [u8; 15],
 ) {
+    write_samples_type(header, hets, effective_samples, buffer, f_buf);
+
     buffer.push(b'\t');
 
     write_samples_type(header, homs, effective_samples, buffer, f_buf);
 
     buffer.push(b'\t');
 
-    write_samples_type(header, hets, effective_samples, buffer, f_buf);
-
-    buffer.push(b'\t');
-
-    buffer.extend_from_slice(&missing_buffer);
+    write_samples_type(header, missing, n_samples as f32, buffer, f_buf);
 
     buffer.push(b'\t');
 
     write_ac_an(buffer, ac, an, bytes, f_buf);
+}
+
+fn write_samples_empty(buffer: &mut Vec<u8>) {
+    buffer.push(b'\t');
+
+    buffer.push(b'!');
+    buffer.push(b'\t');
+
+    buffer.push(b'!');
+    buffer.push(b'\t');
+
+    buffer.push(b'!');
+    buffer.push(b'\t');
+
+    buffer.push(b'0');
+    buffer.push(b'\t');
+
+    buffer.push(b'0');
+    buffer.push(b'\t');
+
+    buffer.push(b'0');
 }
 
 #[inline]
@@ -515,8 +581,29 @@ fn write_chrom(buffer: &mut Vec<u8>, chrom: &[u8]) {
     buffer.extend_from_slice(&chrom);
 }
 
-fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
-    let n_samples = header.len() - 9;
+// fn write_by_alt(&buffer, pos, refr, alt) {
+
+//                     buffer.extend_from_slice(site_type);
+//                     buffer.push(b'\t');
+//                     buffer.push(t_refr[i]);
+//                     buffer.push(b'\t');
+//                     buffer.extend_from_slice(&t_alt[i]);
+//                     buffer.push(b'\t');
+//                     buffer.push(NOT_TSTV);
+//                     buffer.push(b'\t');
+// }
+
+// #[inline]
+// fn simple_ge
+#[allow(clippy::cognitive_complexity)]
+fn process_lines(header: &[Vec<u8>], rows: &[u8]) -> usize {
+    let last_column_idx = header.len() - 1;
+
+    let n_samples = if header.len() > 9 {
+        header.len() as u32 - 9
+    } else {
+        0
+    };
 
     let mut homs: Vec<Vec<u32>> = Vec::new();
     let mut hets: Vec<Vec<u32>> = Vec::new();
@@ -524,8 +611,6 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
     // Even in multiallelic case, missing in one means missing in all
     let mut missing: Vec<u32> = Vec::new();
     let mut ac: Vec<u32> = Vec::new();
-    let mut ac_temp_count: Vec<u8>;
-    let mut an_temp_count: u8;
     // let mut genotype_cache: HashMap<&[u8], (Vec<u8>)>;
     let mut an: u32 = 0;
 
@@ -535,14 +620,13 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
     let excluded_filters: HashMap<&[u8], bool> = HashMap::new();
     let mut n_count = 0;
-    let mut simple_gt = false;
+    // let mut simple_gt = false;
 
     let mut chrom: &[u8] = b"";
     let mut pos: &[u8] = b"";
     let mut refr: &[u8] = b"";
     let mut alt: &[u8] = b"";
 
-    let mut gt_range: &[u8];
     let mut buffer = Vec::with_capacity(10_000);
 
     let mut bytes = Vec::new();
@@ -552,16 +636,20 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
     }
 
     let mut effective_samples: f32;
-    let mut missing_buffer: Vec<u8> = Vec::new();
     let mut alleles: VariantEnum;
 
-    'row_loop: for row in rows.iter() {
+    'row_loop: for row in rows.split(|byt| *byt == b'\n') {
+        if row.is_empty() {
+            break;
+        }
         alleles = VariantEnum::None;
-        // genotype_cache.clear();
-
         n_count += 1;
 
         'field_loop: for (idx, field) in row.split(|byt| *byt == b'\t').enumerate() {
+            // if idx == last_column_idx {
+            //     field = &field[0..field.len() - 1]; // trim newline
+            // }
+
             if idx == CHROM_IDX {
                 chrom = field;
                 continue;
@@ -596,8 +684,8 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                         // TODO: LOG
                         continue 'row_loop;
                     }
-                    VariantEnum::Multi((_, _, _, _, allele_nums)) => {
-                        allele_num = allele_nums.len();
+                    VariantEnum::Complex((_, variants)) => {
+                        allele_num = variants.len();
                     }
                     _ => {
                         allele_num = 1;
@@ -620,91 +708,72 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 continue;
             }
 
-            if idx == FORMAT_IDX {
-                simple_gt = memchr(b':', field) == None;
-                continue;
-            }
-
-            // TODO: Handle haploid genomes
             if idx > FORMAT_IDX {
                 match &alleles {
-                    VariantEnum::Multi((_, _, _, _, allele_nums)) => {
-                        if field.len() >= 3 && field[0] == b'0' && field[2] == b'0' {
-                            an += 2;
-                            continue;
-                        }
+                    VariantEnum::Complex((_, variants)) => {
+                        let mut local_alt_indices_counts = HashMap::new();
+                        let mut local_an_count = 0;
+                        let mut gt: Vec<u8> = Vec::new();
+                        for &chr in field.iter() {
+                            if chr == b'/' || chr == b'|' || chr == b':' {
+                                if gt[0] == b'0' {
+                                    local_an_count += 1;
 
-                        if simple_gt {
-                            gt_range = field;
-                        } else {
-                            // TODO: Don't rely on format?
-                            let end = memchr(b':', field).unwrap();
-                            gt_range = &field[0..end];
-                        }
+                                    if chr == b':' {
+                                        break;
+                                    }
 
-                        if memchr(b'.', gt_range) != None {
-                            missing.push(idx as u32);
-                            continue;
-                        }
+                                    gt.clear();
+                                    continue;
+                                }
 
-                        // if genotype_cache.contains_key(gt_range) {
-                        //     let geno = genotype_cache.get(gt_range);
+                                let gtn = usize::from_radix_10(&gt);
 
-                        //     println!("HIT");
-                        // }
+                                if gtn.1 == 0 {
+                                    eprintln!(
+                                        "{:?}:{:?}: skipping: couldn't parse genotype {:?} for sample {:?}",
+                                        chrom, pos, gt, header[idx]
+                                    );
 
-                        ac_temp_count = vec![0; allele_nums.len()];
-                        an_temp_count = 0;
+                                    continue 'row_loop;
+                                }
 
-                        for gt in gt_range.split(|byt| *byt == b'|' || *byt == b'/') {
-                            // println!("GT : {}", std::str::from_utf8(gt).unwrap());
-                            an_temp_count += 1;
-
-                            if gt[0] == b'0' {
-                                continue;
-                            }
-
-                            let gtn = u32::from_radix_10(gt);
-
-                            if gtn.1 == 0 {
-                                // TODO: Handle failure
-                                panic!("WTF");
-                            }
-
-                            // TODO: What do for complex or malformed alleles that we skipped?
-                            // TODO: Think about making MNPs more efficient; could store as 1 block
-                            // maybe prepended with MNP-, and then deconvolve when writing
-                            // Currently we're counting against an
-                            // Count genotype? no?
-                            let mut aiter = allele_nums.iter();
-                            match aiter.position(|&n| n == gtn.0) {
-                                None => continue,
-                                Some(mut alt_idx) => {
-                                    // alt_temp_indices.push(alt_idx);
-                                    ac_temp_count[alt_idx] += 1;
-
-                                    // If this is an mnp, each split allele belongs to one allele
-                                    while aiter.next() == Some(&gtn.0) {
-                                        alt_idx += 1;
-                                        ac_temp_count[alt_idx] += 1;
-                                        // alt_temp_indices.push(alt_idx);
+                                let alt_idx = gtn.0 - 1;
+                                // maybe prepended with MNP-, and then deconvolve when writing
+                                // Currently we're counting against an
+                                // TODO: We can't just index into local_ac_count
+                                match variants[alt_idx as usize] {
+                                    AlleleTypes::None => continue,
+                                    _ => {
+                                        local_an_count += 1;
+                                        *local_alt_indices_counts.entry(alt_idx).or_insert(0) += 1;
                                     }
                                 }
+
+                                if chr == b':' {
+                                    break;
+                                }
+
+                                gt.clear();
                             }
+
+                            if chr == b'.' {
+                                // A single missing genotype likely means the call is inaccurate
+                                missing.push(idx as u32);
+                                continue 'field_loop;
+                            }
+
+                            gt.push(chr);
                         }
 
-                        an += an_temp_count as u32;
+                        an += local_an_count as u32;
+                        for (&ac_idx, &ac_cnt) in local_alt_indices_counts.iter() {
+                            ac[ac_idx] += ac_cnt;
 
-                        // genotype_cache.insert(gt_range, (an_temp_count, &ac_temp_count));
-
-                        for (ac_idx, &ac_cnt) in ac_temp_count.iter().enumerate() {
-                            ac[ac_idx] += ac_cnt as u32;
-
-                            if ac_cnt == an_temp_count {
+                            if local_an_count == ac_cnt {
                                 homs[ac_idx].push(idx as u32);
                                 break;
                             }
-
                             hets[ac_idx].push(idx as u32);
                         }
                     }
@@ -756,25 +825,12 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 }
             }
         }
-
         if n_samples > 0 && an == 0 {
             continue;
         }
 
-        if missing_buffer.len() > 0 {
-            missing_buffer.clear()
-        }
-
-        write_samples_type(
-            &header,
-            &missing,
-            n_samples as f32,
-            &mut missing_buffer,
-            &mut f_buf,
-        );
-
-        if missing.len() > 0 {
-            effective_samples = { n_samples - missing.len() } as f32;
+        if !missing.is_empty() {
+            effective_samples = { n_samples - missing.len() as u32 } as f32;
         } else {
             effective_samples = n_samples as f32;
         }
@@ -802,23 +858,27 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 buffer.push(TSTV[refr as usize][alt as usize]);
                 buffer.push(b'\t');
 
-                write_samples(
-                    header,
-                    &mut buffer,
-                    &hets[0],
-                    &homs[0],
-                    &missing_buffer,
-                    effective_samples,
-                    ac[0],
-                    an,
-                    &mut bytes,
-                    &mut f_buf,
-                );
+                if n_samples > 0 {
+                    write_samples(
+                        header,
+                        &mut buffer,
+                        &hets[0],
+                        &homs[0],
+                        &missing,
+                        effective_samples,
+                        n_samples,
+                        ac[0],
+                        an,
+                        &mut bytes,
+                        &mut f_buf,
+                    );
+                } else {
+                    write_samples_empty(&mut buffer);
+                }
+                buffer.push(b'\t');
             }
-            VariantEnum::Multi(v) => {
-                let (site_type, t_pos, t_refr, t_alt, _allele_nums) = v;
-
-                for i in 0..t_pos.len() {
+            VariantEnum::Complex((site_type_idx, variants)) => {
+                for i in 0..variants.len() {
                     if n_samples > 0 && ac[i] == 0 {
                         continue;
                     }
@@ -826,38 +886,101 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                     if i > 0 {
                         buffer.push(b'\n');
                     }
-
                     write_chrom(&mut buffer, &chrom);
                     buffer.push(b'\t');
+                    match &variants[i] {
+                        AlleleTypes::None => {
+                            continue;
+                        }
+                        AlleleTypes::SNP(v) => {
+                            itoa::write(&mut bytes, v.position).unwrap();
+                            buffer.extend_from_slice(&bytes);
+                            bytes.clear();
 
-                    itoa::write(&mut bytes, t_pos[i]).unwrap();
-                    buffer.extend_from_slice(&bytes);
-                    bytes.clear();
+                            buffer.push(b'\t');
 
-                    buffer.push(b'\t');
+                            buffer.extend_from_slice(SITE_TYPES[*site_type_idx as usize]);
+                            buffer.push(b'\t');
+                            buffer.push(v.reference);
+                            buffer.push(b'\t');
+                            itoa::write(&mut bytes, v.alternate).unwrap();
+                            buffer.extend_from_slice(&bytes);
+                            bytes.clear();
 
-                    buffer.extend_from_slice(site_type);
-                    buffer.push(b'\t');
-                    buffer.push(t_refr[i]);
-                    buffer.push(b'\t');
-                    buffer.extend_from_slice(&t_alt[i]);
-                    buffer.push(b'\t');
-                    buffer.push(NOT_TSTV);
-                    buffer.push(b'\t');
+                            buffer.push(b'\t');
+                            if *site_type_idx == MULTI_IDX {
+                                buffer.push(NOT_TSTV)
+                            } else {
+                                buffer.push(TSTV[v.reference as usize][v.alternate as usize])
+                            }
+                            buffer.push(b'\t');
+                        }
+                        AlleleTypes::INS(v) | AlleleTypes::DEL(v) => {
+                            itoa::write(&mut bytes, v.position).unwrap();
+                            buffer.extend_from_slice(&bytes);
+                            bytes.clear();
 
-                    write_samples(
-                        header,
-                        &mut buffer,
-                        &hets[i],
-                        &homs[i],
-                        &missing_buffer,
-                        effective_samples,
-                        ac[i],
-                        an,
-                        &mut bytes,
-                        &mut f_buf,
-                    );
+                            buffer.push(b'\t');
+
+                            buffer.extend_from_slice(SITE_TYPES[*site_type_idx as usize]);
+                            buffer.push(b'\t');
+                            buffer.push(v.reference);
+                            buffer.push(b'\t');
+                            buffer.extend_from_slice(&v.alternate);
+                            bytes.clear();
+
+                            buffer.push(b'\t');
+                            buffer.push(NOT_TSTV);
+                            buffer.push(b'\t');
+                        }
+                        AlleleTypes::MNP(v) => {
+                            for mnp_part in v {
+                                itoa::write(&mut bytes, mnp_part.position).unwrap();
+                                buffer.extend_from_slice(&bytes);
+                                bytes.clear();
+
+                                buffer.push(b'\t');
+
+                                buffer.extend_from_slice(SITE_TYPES[*site_type_idx as usize]);
+                                buffer.push(b'\t');
+                                buffer.push(mnp_part.reference);
+                                buffer.push(b'\t');
+                                itoa::write(&mut bytes, mnp_part.alternate).unwrap();
+                                buffer.extend_from_slice(&bytes);
+                                bytes.clear();
+
+                                buffer.push(b'\t');
+                                if *site_type_idx == MULTI_IDX {
+                                    buffer.push(NOT_TSTV)
+                                } else {
+                                    buffer.push(
+                                        TSTV[mnp_part.reference as usize]
+                                            [mnp_part.alternate as usize],
+                                    )
+                                }
+                                buffer.push(b'\t');
+                            }
+                        }
+                    }
+                    if n_samples > 0 {
+                        write_samples(
+                            header,
+                            &mut buffer,
+                            &hets[i],
+                            &homs[i],
+                            &missing,
+                            effective_samples,
+                            n_samples,
+                            ac[i],
+                            an,
+                            &mut bytes,
+                            &mut f_buf,
+                        );
+                    } else {
+                        write_samples_empty(&mut buffer);
+                    }
                 }
+                buffer.push(b'\t');
             }
             VariantEnum::Del(v) => {
                 let &(pos, refr, alt) = v;
@@ -876,18 +999,24 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 buffer.push(NOT_TSTV);
                 buffer.push(b'\t');
 
-                write_samples(
-                    header,
-                    &mut buffer,
-                    &hets[0],
-                    &homs[0],
-                    &missing_buffer,
-                    effective_samples,
-                    ac[0],
-                    an,
-                    &mut bytes,
-                    &mut f_buf,
-                );
+                if n_samples > 0 {
+                    write_samples(
+                        header,
+                        &mut buffer,
+                        &hets[0],
+                        &homs[0],
+                        &missing,
+                        effective_samples,
+                        n_samples,
+                        ac[0],
+                        an,
+                        &mut bytes,
+                        &mut f_buf,
+                    );
+                } else {
+                    write_samples_empty(&mut buffer);
+                }
+                buffer.push(b'\t');
             }
             VariantEnum::Ins(v) => {
                 let &(pos, refr, alt) = v;
@@ -906,41 +1035,47 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 buffer.push(b'\t');
                 buffer.push(NOT_TSTV);
                 buffer.push(b'\t');
-
-                write_samples(
-                    header,
-                    &mut buffer,
-                    &hets[0],
-                    &homs[0],
-                    &missing_buffer,
-                    effective_samples,
-                    ac[0],
-                    an,
-                    &mut bytes,
-                    &mut f_buf,
-                );
+                if n_samples > 0 {
+                    write_samples(
+                        header,
+                        &mut buffer,
+                        &hets[0],
+                        &homs[0],
+                        &missing,
+                        effective_samples,
+                        n_samples,
+                        ac[0],
+                        an,
+                        &mut bytes,
+                        &mut f_buf,
+                    );
+                } else {
+                    write_samples_empty(&mut buffer);
+                }
+                buffer.push(b'\t');
             }
         }
-
+        // vcfPos
+        buffer.extend_from_slice(pos);
         buffer.push(b'\n');
     }
 
-    if buffer.len() > 0 {
+    if !buffer.is_empty() {
         io::stdout().write_all(&buffer).unwrap();
     }
 
     n_count
 }
-
+use std::io::BufReader;
 fn main() -> Result<(), io::Error> {
     let (s1, r1) = unbounded();
     let n_cpus = num_cpus::get() - 1;
 
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
+    // let mut stdin_lock = stdin.lock();
 
-    let mut lines: Vec<Vec<u8>> = Vec::with_capacity(64);
-    let mut len: usize;
+    // let mut lines: Vec<Vec<u8>> = Vec::with_capacity(64);
     let mut n_count = 0;
 
     let header: Arc<Vec<Vec<u8>>> = Arc::new(
@@ -954,6 +1089,8 @@ fn main() -> Result<(), io::Error> {
         info!("Found 9 header fields. When genotypes present, we expect 1+ samples after FORMAT (10 fields minimum)")
     }
 
+    io::stdout().write_all(b"chrom\tpos\ttype\tref\talt\ttrTv\theterozygotes\theterozygosity\thomozygotes\thomozygosity\tmissingGenos\tmissingness\tac\tan\tsampleMaf\tvcfPos\n")?;
+
     let mut threads = vec![];
 
     for _i in 0..n_cpus {
@@ -964,7 +1101,7 @@ fn main() -> Result<(), io::Error> {
             let mut n_count: usize = 0;
 
             loop {
-                let message: Vec<Vec<u8>> = match r.recv() {
+                let message: Vec<u8> = match r.recv() {
                     Ok(v) => v,
                     Err(_) => break,
                 };
@@ -976,25 +1113,51 @@ fn main() -> Result<(), io::Error> {
         }));
     }
 
-    let max_lines = 32;
+    // let max_lines = 2048;
+    let mut buf: Vec<u8> = Vec::with_capacity(1024 * 1024);
+    let mut count = 0;
     loop {
-        let mut buf: Vec<u8> = Vec::new();
-        len = stdin_lock.read_until(0xA, &mut buf)?;
+        stdin_lock.read_until(b'\n', &mut buf)?;
+        count += 1;
 
-        if len == 0 {
-            if lines.len() > 0 {
-                s1.send(lines).unwrap();
+        if count > 48 {
+            s1.send(buf).unwrap();
+            count = 0;
+            buf = Vec::with_capacity(48 * 1024 * 1024);
+        }
+
+        match stdin_lock.read_chunk(&mut buf, 32) {
+            Ok(v) => {
+                // println!("GOT N LINES {}", v);
+                // n_count += usize;
+                if v > 0 {
+                    // println!("{:?}", buf);
+                    s1.send(buf).unwrap();
+                    buf = Vec::with_capacity(1024 * 1024);
+
+                    continue;
+                }
+
+                break;
             }
-            break;
+            _ => break,
         }
+        // // println!("BUFF! {:?}", buf);
+        // if len == 0 {
+        //     if lines.len() > 0 {
+        //         s1.send(lines).unwrap();
+        //     }
+        //     break;
+        // }
 
-        lines.push(buf);
-        n_count += 1;
+        // lines.push(buf);
+        // // n_count += 1;
 
-        if lines.len() > max_lines {
-            s1.send(lines).unwrap();
-            lines = Vec::with_capacity(max_lines);
-        }
+        // if lines.len() > max_lines {
+        //     s1.send(lines).unwrap();
+
+        //     lines = Vec::with_capacity(max_lines);
+        // }
     }
 
     drop(s1);
@@ -1004,7 +1167,39 @@ fn main() -> Result<(), io::Error> {
         total += thread.join().unwrap();
     }
 
-    assert_eq!(total, n_count);
+    // assert_eq!(total, n_count);
 
     return Ok(());
 }
+
+//https://play.rust-lang.org/?version=stable&mode=debug&edition=2018&gist=615e0da07bf50e56ae41664dedd0c28c
+pub trait ChunkReader: io::BufRead {
+    /// Reads and copies the underlying buffer into the provided `Vec`; does additional reads
+    /// until a newline (the 0xA byte) is reached.
+    fn read_chunk(&mut self, buf: &mut Vec<u8>, max: usize) -> io::Result<usize> {
+        // Read one buffer worth of data as a whole
+        let mut total = 0;
+        loop {
+            let readbuf = self.fill_buf()?;
+
+            if readbuf.is_empty() {
+                return Ok(0);
+            }
+
+            let len = readbuf.len();
+            total += 1;
+
+            // buf.reserve(len + 2048);
+            buf.extend_from_slice(&readbuf);
+            self.consume(len);
+
+            if total >= max {
+                total += self.read_until(b'\n', buf)?;
+                println!("LEN IS {}", total);
+                return Ok(total);
+            }
+        }
+    }
+}
+
+impl<T> ChunkReader for T where T: io::BufRead {}
