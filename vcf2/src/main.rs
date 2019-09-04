@@ -76,33 +76,41 @@ static TSTV: [[u8; 256]; 256] = {
 //         b"homozygosity", b"missingGenos", b"missingness", b"ac", b"an", b"sampleMaf"]
 // }
 // TODO: Add error handling
-fn get_header<T: BufRead>(reader: &mut T) -> Vec<u8> {
-    let mut line: String = String::with_capacity(10_000);
-    reader.read_line(&mut line).unwrap();
+fn get_header_and_num_eol_chars<T: BufRead>(reader: &mut T) -> (Vec<u8>, usize) {
+    let mut buf = Vec::new();
+    let len = reader.read_until(b'\n', &mut buf).unwrap();
 
-    if !line.starts_with("##fileformat=VCFv4") {
-        panic!("File format not supported: {}", line);
+    if len == 0 {
+        panic!("Empty file")
     }
 
-    line.clear();
+    if !buf.starts_with(b"##fileformat=VCFv4") {
+        panic!(
+            "File format not supported: {}",
+            std::str::from_utf8(&buf).unwrap()
+        );
+    }
 
     loop {
-        reader.read_line(&mut line).unwrap();
-        if line.starts_with("#CHROM") {
+        buf.clear();
+        reader.read_until(b'\n', &mut buf).unwrap();
+
+        if buf.starts_with(b"#CHROM") {
             break;
         }
 
-        if !line.starts_with("#") {
+        if buf[0] != b'#' {
             panic!("Not a VCF file")
         }
-
-        line.clear();
     }
 
-    //https://users.rust-lang.org/t/trim-string-in-place/15809/9
-    line.truncate(line.trim_end().len());
+    let len = buf.len();
 
-    Vec::from(line.as_bytes())
+    if buf[len - 2] == b'\r' {
+        return (buf, 2);
+    }
+
+    (buf, 1)
 }
 
 #[inline(always)]
@@ -597,8 +605,6 @@ fn write_chrom(buffer: &mut Vec<u8>, chrom: &[u8]) {
 // fn simple_ge
 #[allow(clippy::cognitive_complexity)]
 fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
-    let last_column_idx = header.len() - 1;
-
     let n_samples = if header.len() > 9 {
         header.len() as u32 - 9
     } else {
@@ -643,10 +649,6 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
         n_count += 1;
 
         'field_loop: for (idx, field) in row.split(|byt| *byt == b'\t').enumerate() {
-            // if idx == last_column_idx {
-            //     field = &field[0..field.len() - 1]; // trim newline
-            // }
-
             if idx == CHROM_IDX {
                 chrom = field;
                 continue;
@@ -1063,17 +1065,18 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
     n_count
 }
-use std::io::BufReader;
+
 fn main() -> Result<(), io::Error> {
     let (s1, r1) = unbounded();
-    let n_cpus = num_cpus::get() - 1;
+    let n_cpus = num_cpus::get();
 
     let stdin = io::stdin();
-    let mut stdin_lock = BufReader::with_capacity(48 * 1024 * 1024, stdin.lock());
+    let mut stdin_lock = std::io::BufReader::with_capacity(48 * 1024 * 1024, stdin.lock());
+
+    let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut stdin_lock);
 
     let header: Arc<Vec<Vec<u8>>> = Arc::new(
-        get_header(&mut stdin_lock)
-            .split(|b| *b == b'\t')
+        head.split(|b| *b == b'\t')
             .map(|sample| sample.to_vec())
             .collect(),
     );
@@ -1082,6 +1085,7 @@ fn main() -> Result<(), io::Error> {
         info!("Found 9 header fields. When genotypes present, we expect 1+ samples after FORMAT (10 fields minimum)")
     }
 
+    // TODO: print header programmatically
     io::stdout().write_all(b"chrom\tpos\ttype\tref\talt\ttrTv\theterozygotes\theterozygosity\thomozygotes\thomozygosity\tmissingGenos\tmissingness\tac\tan\tsampleMaf\tvcfPos\n")?;
 
     let mut threads = vec![];
@@ -1108,12 +1112,13 @@ fn main() -> Result<(), io::Error> {
 
     let max_lines = 48;
     let mut len;
-    let mut lines: Vec<Vec<u8>> = Vec::with_capacity(128);
-    let mut buf = Vec::with_capacity(10 * 1024 * 1024);
+    let mut lines: Vec<Vec<u8>> = Vec::with_capacity(max_lines);
+    let mut buf = Vec::with_capacity(48 * 1024 * 1024);
     let mut n_count = 0;
+
     loop {
         // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
-        len = stdin_lock.read_until(0xA, &mut buf)?;
+        len = stdin_lock.read_until(b'\n', &mut buf)?;
 
         if len == 0 {
             if lines.len() > 0 {
@@ -1123,16 +1128,15 @@ fn main() -> Result<(), io::Error> {
         }
 
         // TOOD read end of line number of characters from header
-        lines.push(buf[..len - 1].to_vec());
+        lines.push(buf[..len - n_eol_chars].to_vec());
         buf.clear();
 
         if lines.len() == max_lines {
             n_count += lines.len();
             s1.send(lines).unwrap();
-            lines = Vec::with_capacity(128);
+            lines = Vec::with_capacity(max_lines);
         }
     }
-      
     drop(s1);
 
     let mut total = 0;
@@ -1144,35 +1148,3 @@ fn main() -> Result<(), io::Error> {
 
     return Ok(());
 }
-
-//https://play.rust-lang.org/?version=stable&mode=debug&edition=2018&gist=615e0da07bf50e56ae41664dedd0c28c
-pub trait ChunkReader: io::BufRead {
-    /// Reads and copies the underlying buffer into the provided `Vec`; does additional reads
-    /// until a newline (the 0xA byte) is reached.
-    fn read_chunk(&mut self, buf: &mut Vec<u8>, max: usize) -> io::Result<usize> {
-        // Read one buffer worth of data as a whole
-        let mut total = 0;
-        loop {
-            let readbuf = self.fill_buf()?;
-
-            if readbuf.is_empty() {
-                return Ok(0);
-            }
-
-            let len = readbuf.len();
-            total += 1;
-
-            // buf.reserve(len + 2048);
-            buf.extend_from_slice(&readbuf);
-            self.consume(len);
-
-            if total >= max {
-                total += self.read_until(b'\n', buf)?;
-                println!("LEN IS {}", total);
-                return Ok(total);
-            }
-        }
-    }
-}
-
-impl<T> ChunkReader for T where T: io::BufRead {}
