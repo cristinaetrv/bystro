@@ -596,7 +596,7 @@ fn write_chrom(buffer: &mut Vec<u8>, chrom: &[u8]) {
 // #[inline]
 // fn simple_ge
 #[allow(clippy::cognitive_complexity)]
-fn process_lines(header: &[Vec<u8>], rows: &[u8]) -> usize {
+fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
     let last_column_idx = header.len() - 1;
 
     let n_samples = if header.len() > 9 {
@@ -638,10 +638,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[u8]) -> usize {
     let mut effective_samples: f32;
     let mut alleles: VariantEnum;
 
-    'row_loop: for row in rows.split(|byt| *byt == b'\n') {
-        if row.is_empty() {
-            break;
-        }
+    'row_loop: for row in rows {
         alleles = VariantEnum::None;
         n_count += 1;
 
@@ -1072,11 +1069,7 @@ fn main() -> Result<(), io::Error> {
     let n_cpus = num_cpus::get() - 1;
 
     let stdin = io::stdin();
-    let mut stdin_lock = stdin.lock();
-    // let mut stdin_lock = stdin.lock();
-
-    // let mut lines: Vec<Vec<u8>> = Vec::with_capacity(64);
-    let mut n_count = 0;
+    let mut stdin_lock = BufReader::with_capacity(48 * 1024 * 1024, stdin.lock());
 
     let header: Arc<Vec<Vec<u8>>> = Arc::new(
         get_header(&mut stdin_lock)
@@ -1101,7 +1094,7 @@ fn main() -> Result<(), io::Error> {
             let mut n_count: usize = 0;
 
             loop {
-                let message: Vec<u8> = match r.recv() {
+                let message: Vec<Vec<u8>> = match r.recv() {
                     Ok(v) => v,
                     Err(_) => break,
                 };
@@ -1113,53 +1106,33 @@ fn main() -> Result<(), io::Error> {
         }));
     }
 
-    // let max_lines = 2048;
-    let mut buf: Vec<u8> = Vec::with_capacity(1024 * 1024);
-    let mut count = 0;
+    let max_lines = 48;
+    let mut len;
+    let mut lines: Vec<Vec<u8>> = Vec::with_capacity(128);
+    let mut buf = Vec::with_capacity(10 * 1024 * 1024);
+    let mut n_count = 0;
     loop {
-        stdin_lock.read_until(b'\n', &mut buf)?;
-        count += 1;
+        // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
+        len = stdin_lock.read_until(0xA, &mut buf)?;
 
-        if count > 48 {
-            s1.send(buf).unwrap();
-            count = 0;
-            buf = Vec::with_capacity(48 * 1024 * 1024);
-        }
-
-        match stdin_lock.read_chunk(&mut buf, 32) {
-            Ok(v) => {
-                // println!("GOT N LINES {}", v);
-                // n_count += usize;
-                if v > 0 {
-                    // println!("{:?}", buf);
-                    s1.send(buf).unwrap();
-                    buf = Vec::with_capacity(1024 * 1024);
-
-                    continue;
-                }
-
-                break;
+        if len == 0 {
+            if lines.len() > 0 {
+                s1.send(lines).unwrap();
             }
-            _ => break,
+            break;
         }
-        // // println!("BUFF! {:?}", buf);
-        // if len == 0 {
-        //     if lines.len() > 0 {
-        //         s1.send(lines).unwrap();
-        //     }
-        //     break;
-        // }
 
-        // lines.push(buf);
-        // // n_count += 1;
+        // TOOD read end of line number of characters from header
+        lines.push(buf[..len - 1].to_vec());
+        buf.clear();
 
-        // if lines.len() > max_lines {
-        //     s1.send(lines).unwrap();
-
-        //     lines = Vec::with_capacity(max_lines);
-        // }
+        if lines.len() == max_lines {
+            n_count += lines.len();
+            s1.send(lines).unwrap();
+            lines = Vec::with_capacity(128);
+        }
     }
-
+      
     drop(s1);
 
     let mut total = 0;
@@ -1167,7 +1140,7 @@ fn main() -> Result<(), io::Error> {
         total += thread.join().unwrap();
     }
 
-    // assert_eq!(total, n_count);
+    assert_eq!(total, n_count);
 
     return Ok(());
 }
