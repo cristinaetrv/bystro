@@ -866,10 +866,10 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                         }
                     }
                     _ => {
-                        if field.len() == 1 {
+                        if field.len() == 1 || field[1] == b':' {
                             if field[0] == b'0' {
                                 an += 1;
-                            } else if field[2] == b'1' {
+                            } else if field[0] == b'1' {
                                 an += 1;
                                 ac[0] += 1;
                                 homs[0].push(idx as u32);
