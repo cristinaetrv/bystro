@@ -36,15 +36,6 @@ const DEL: &[u8] = b"DEL";
 const MNP: &[u8] = b"MNP";
 const MULTI: &[u8] = b"MULTIALLELIC";
 
-// const site_types: &[[u8]] = [SNP, INS, DEL, MNP, MULTI];
-const SITE_TYPES: [&[u8]; 5] = [SNP, INS, DEL, MNP, MULTI];
-
-const SNP_IDX: u8 = 0;
-const INS_IDX: u8 = 1;
-const DEL_IDX: u8 = 2;
-const MNP_IDX: u8 = 3;
-const MULTI_IDX: u8 = 4;
-
 const A: u8 = b'A';
 const C: u8 = b'C';
 const G: u8 = b'G';
@@ -150,16 +141,18 @@ struct SnpType<'a> {
 }
 
 impl<'a> SnpType<'a> {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>, not_ts_tv: bool) {
+    fn write_to_buf(&self, buffer: &mut Vec<u8>, site_type_override: Option<&[u8]>) {
+        let site_type = site_type_override.unwrap_or(SNP);
+
         buffer.extend_from_slice(self.position);
         buffer.push(b'\t');
-        buffer.extend_from_slice(SNP);
+        buffer.extend_from_slice(site_type);
         buffer.push(b'\t');
         buffer.push(self.reference);
         buffer.push(b'\t');
         buffer.push(self.alternate);
         buffer.push(b'\t');
-        if not_ts_tv {
+        if site_type == MULTI {
             buffer.push(NOT_TSTV);
         } else {
             buffer.push(TSTV[self.reference as usize][self.alternate as usize]);
@@ -169,7 +162,6 @@ impl<'a> SnpType<'a> {
     }
 }
 
-// pos, refr[1], 1 - refr.len() as i32
 struct DelType {
     position: u32,
     alternate: i32,
@@ -177,10 +169,15 @@ struct DelType {
 }
 
 impl DelType {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>, itoa_buffer: &mut Vec<u8>) {
+    fn write_to_buf(
+        &self,
+        buffer: &mut Vec<u8>,
+        itoa_buffer: &mut Vec<u8>,
+        site_type_override: Option<&[u8]>,
+    ) {
         write_int(buffer, self.position, itoa_buffer);
         buffer.push(b'\t');
-        buffer.extend_from_slice(DEL);
+        buffer.extend_from_slice(site_type_override.unwrap_or(DEL));
         buffer.push(b'\t');
         buffer.push(self.reference);
         buffer.push(b'\t');
@@ -198,10 +195,15 @@ struct InsType<'a> {
 }
 
 impl<'a> InsType<'a> {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>, itoa_buffer: &mut Vec<u8>) {
+    fn write_to_buf(
+        &self,
+        buffer: &mut Vec<u8>,
+        itoa_buffer: &mut Vec<u8>,
+        site_type_override: Option<&[u8]>,
+    ) {
         write_int(buffer, self.position, itoa_buffer);
         buffer.push(b'\t');
-        buffer.extend_from_slice(INS);
+        buffer.extend_from_slice(site_type_override.unwrap_or(INS));
         buffer.push(b'\t');
         buffer.push(self.reference);
         buffer.push(b'\t');
@@ -213,12 +215,41 @@ impl<'a> InsType<'a> {
     }
 }
 
-struct MNPType<'a>(Vec<SnpType<'a>>);
+struct MNPType {
+    positions: Vec<u32>,
+    alternates: Vec<u8>,
+    references: Vec<u8>,
+}
 
-impl<'a> MNPType<'a> {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>, not_ts_tv: bool) {
-        for snp in self.0.iter() {
-            snp.write_to_buf(buffer, not_ts_tv)
+// TODO: could simplify, ran across borrow checker
+impl MNPType {
+    fn write_to_buf(
+        &self,
+        buffer: &mut Vec<u8>,
+        itoa_buffer: &mut Vec<u8>,
+        site_type_override: Option<&[u8]>,
+    ) {
+        let length = self.positions.len();
+
+        let site_type: &[u8] =
+            site_type_override.unwrap_or_else(|| if length == 1 { SNP } else { MNP });
+
+        for i in 0..length - 1 {
+            write_int(buffer, self.positions[i], itoa_buffer);
+            buffer.push(b'\t');
+            buffer.extend_from_slice(site_type);
+            buffer.push(b'\t');
+            buffer.push(self.references[i]);
+            buffer.push(b'\t');
+            buffer.push(self.alternates[i]);
+            buffer.push(b'\t');
+            if site_type == MULTI {
+                buffer.push(NOT_TSTV);
+            } else {
+                buffer.push(TSTV[self.references[i] as usize][self.alternates[i] as usize]);
+            }
+
+            buffer.push(b'\t');
         }
     }
 }
@@ -227,23 +258,27 @@ enum VariantEnum<'a> {
     SNP(SnpType<'a>),
     INS(InsType<'a>),
     DEL(DelType),
-    MNP(MNPType<'a>),
+    MNP(MNPType),
     None,
 }
 
 impl<'a> VariantEnum<'a> {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>, itoa_buffer: &mut Vec<u8>, not_ts_tv: bool) {
+    fn write_to_buf(
+        &self,
+        buffer: &mut Vec<u8>,
+        itoa_buffer: &mut Vec<u8>,
+        site_type: Option<&[u8]>,
+    ) {
         match self {
-            VariantEnum::SNP(v) => v.write_to_buf(buffer, not_ts_tv),
-            VariantEnum::MNP(v) => v.write_to_buf(buffer, not_ts_tv),
-            VariantEnum::INS(v) => v.write_to_buf(buffer, itoa_buffer),
-            VariantEnum::DEL(v) => v.write_to_buf(buffer, itoa_buffer),
+            VariantEnum::SNP(v) => v.write_to_buf(buffer, site_type),
+            VariantEnum::MNP(v) => v.write_to_buf(buffer, itoa_buffer, site_type),
+            VariantEnum::INS(v) => v.write_to_buf(buffer, itoa_buffer, site_type),
+            VariantEnum::DEL(v) => v.write_to_buf(buffer, itoa_buffer, site_type),
             VariantEnum::None => return,
         }
     }
 }
 
-// #[derive(Debug)]
 enum SiteEnum<'a> {
     MonoAllelic(VariantEnum<'a>),
     MultiAllelic(Vec<VariantEnum<'a>>),
@@ -370,39 +405,33 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
         // we label it as such
 
         //1st check for MNPs and extra-padding SNPs
-        // if refr.len() == t_alt.len() {
-        //     let mut mnp_alleles: Vec<SnpType> = Vec::with_capacity(t_alt.len());
-        //     let mut pos_buf = Vec::new();
-        //     for i in 0..refr.len() {
-        //         if refr[i] != t_alt[i] {
-        //             // A bit slower, but simpler by union with simple snp
-        //             itoa::write(&mut pos_buf, pos_num + i as u32).unwrap();
+        if refr.len() == t_alt.len() {
+            let mut positions = Vec::with_capacity(t_alt.len());
+            let mut alternates = Vec::with_capacity(t_alt.len());
+            let mut references = Vec::with_capacity(t_alt.len());
 
-        //             mnp_alleles.push(SnpType {
-        //                 position: &pos_buf.to_owned(),
-        //                 reference: refr[i],
-        //                 alternate: t_alt[i],
-        //             });
+            for i in 0..refr.len() {
+                if refr[i] != t_alt[i] {
+                    positions.push(pos_num + i as u32);
+                    references.push(refr[i]);
+                    alternates.push(t_alt[i]);
+                }
+            }
 
-        //             pos_buf.clear();
-        //         }
-        //     }
+            if positions.len() == 0 {
+                variants.push(VariantEnum::None);
+                continue;
+            }
+            // TODO: Could write as SNP here
+            variants.push(VariantEnum::MNP(MNPType {
+                positions: positions,
+                alternates: alternates,
+                references: references,
+            }));
+            n_valid_alleles += 1;
 
-        //     if mnp_alleles.len() == 0 {
-        //         variants.push(VariantEnum::None);
-        //         continue;
-        //     }
-
-        //     if mnp_alleles.len() == 1 {
-        //         variants.push(VariantEnum::SNP(mnp_alleles[0]));
-        //         n_valid_alleles += 1;
-        //     } else {
-        //         variants.push(VariantEnum::MNP(MNPType(mnp_alleles)));
-        //         n_valid_alleles += 1;
-        //     }
-
-        //     continue;
-        // }
+            continue;
+        }
 
         // Find the allele representation that minimizes padding, while still checking
         // that the site isn't a mixed type (indel + snp) and checking for intercolation
@@ -904,7 +933,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 write_chrom(&mut buffer, &chrom);
                 buffer.push(b'\t');
 
-                allele.write_to_buf(&mut buffer, &mut bytes, false);
+                allele.write_to_buf(&mut buffer, &mut bytes, None);
 
                 if n_samples > 0 {
                     write_samples(
@@ -938,7 +967,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                     write_chrom(&mut buffer, &chrom);
                     buffer.push(b'\t');
 
-                    variants[i].write_to_buf(&mut buffer, &mut bytes, false);
+                    variants[i].write_to_buf(&mut buffer, &mut bytes, Some(MULTI));
 
                     if n_samples > 0 {
                         write_samples(
