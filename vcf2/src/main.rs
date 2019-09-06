@@ -678,20 +678,6 @@ fn write_chrom(buffer: &mut Vec<u8>, chrom: &[u8]) {
     buffer.extend_from_slice(&chrom);
 }
 
-// fn write_by_alt(&buffer, pos, refr, alt) {
-
-//                     buffer.extend_from_slice(site_type);
-//                     buffer.push(b'\t');
-//                     buffer.push(t_refr[i]);
-//                     buffer.push(b'\t');
-//                     buffer.extend_from_slice(&t_alt[i]);
-//                     buffer.push(b'\t');
-//                     buffer.push(NOT_TSTV);
-//                     buffer.push(b'\t');
-// }
-
-// #[inline]
-// fn simple_ge
 #[allow(clippy::cognitive_complexity)]
 fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
     let n_samples = if header.len() > 9 {
