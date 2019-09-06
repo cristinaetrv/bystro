@@ -142,18 +142,31 @@ fn filter_passes(
         && (excluded_filters.len() == 0 || !excluded_filters.contains_key(filter_field))
 }
 
-trait Variant {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>);
-}
-
+#[derive(Clone, Copy)]
 struct SnpType<'a> {
     position: &'a [u8],
     alternate: u8,
     reference: u8,
 }
 
-impl<'a> Variant for SnpType<'a> {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>) {}
+impl<'a> SnpType<'a> {
+    fn write_to_buf(&self, buffer: &mut Vec<u8>, not_ts_tv: bool) {
+        buffer.extend_from_slice(self.position);
+        buffer.push(b'\t');
+        buffer.extend_from_slice(SNP);
+        buffer.push(b'\t');
+        buffer.push(self.reference);
+        buffer.push(b'\t');
+        buffer.push(self.alternate);
+        buffer.push(b'\t');
+        if not_ts_tv {
+            buffer.push(NOT_TSTV);
+        } else {
+            buffer.push(TSTV[self.reference as usize][self.alternate as usize]);
+        }
+
+        buffer.push(b'\t');
+    }
 }
 
 // pos, refr[1], 1 - refr.len() as i32
@@ -163,8 +176,19 @@ struct DelType {
     reference: u8,
 }
 
-impl Variant for DelType {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>) {}
+impl DelType {
+    fn write_to_buf(&self, buffer: &mut Vec<u8>, itoa_buffer: &mut Vec<u8>) {
+        write_int(buffer, self.position, itoa_buffer);
+        buffer.push(b'\t');
+        buffer.extend_from_slice(DEL);
+        buffer.push(b'\t');
+        buffer.push(self.reference);
+        buffer.push(b'\t');
+        write_int(buffer, self.alternate, itoa_buffer);
+        buffer.push(b'\t');
+        buffer.push(NOT_TSTV);
+        buffer.push(b'\t');
+    }
 }
 
 struct InsType<'a> {
@@ -173,16 +197,50 @@ struct InsType<'a> {
     reference: u8,
 }
 
-impl<'a> Variant for InsType<'a> {
-    fn write_to_buf(&self, buffer: &mut Vec<u8>) {}
+impl<'a> InsType<'a> {
+    fn write_to_buf(&self, buffer: &mut Vec<u8>, itoa_buffer: &mut Vec<u8>) {
+        write_int(buffer, self.position, itoa_buffer);
+        buffer.push(b'\t');
+        buffer.extend_from_slice(INS);
+        buffer.push(b'\t');
+        buffer.push(self.reference);
+        buffer.push(b'\t');
+        buffer.push(b'+');
+        buffer.extend_from_slice(self.alternate);
+        buffer.push(b'\t');
+        buffer.push(NOT_TSTV);
+        buffer.push(b'\t');
+    }
+}
+
+struct MNPType<'a>(Vec<SnpType<'a>>);
+
+impl<'a> MNPType<'a> {
+    fn write_to_buf(&self, buffer: &mut Vec<u8>, not_ts_tv: bool) {
+        for snp in self.0.iter() {
+            snp.write_to_buf(buffer, not_ts_tv)
+        }
+    }
 }
 
 enum VariantEnum<'a> {
     SNP(SnpType<'a>),
     INS(InsType<'a>),
     DEL(DelType),
-    MNP(Vec<SnpType<'a>>),
+    MNP(MNPType<'a>),
     None,
+}
+
+impl<'a> VariantEnum<'a> {
+    fn write_to_buf(&self, buffer: &mut Vec<u8>, itoa_buffer: &mut Vec<u8>, not_ts_tv: bool) {
+        match self {
+            VariantEnum::SNP(v) => v.write_to_buf(buffer, not_ts_tv),
+            VariantEnum::MNP(v) => v.write_to_buf(buffer, not_ts_tv),
+            VariantEnum::INS(v) => v.write_to_buf(buffer, itoa_buffer),
+            VariantEnum::DEL(v) => v.write_to_buf(buffer, itoa_buffer),
+            VariantEnum::None => return,
+        }
+    }
 }
 
 // #[derive(Debug)]
@@ -312,37 +370,39 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
         // we label it as such
 
         //1st check for MNPs and extra-padding SNPs
-        if refr.len() == t_alt.len() {
-            let mut mnp_alleles: Vec<SnpType> = Vec::with_capacity(t_alt.len());
-            for i in 0..refr.len() {
-                if refr[i] != t_alt[i] {
-                    // A bit slower, but simpler by union with simple snp
-                    let mut pos_buf = Vec::new();
-                    itoa::write(&mut pos_buf, pos_num + i as u32).unwrap();
+        // if refr.len() == t_alt.len() {
+        //     let mut mnp_alleles: Vec<SnpType> = Vec::with_capacity(t_alt.len());
+        //     let mut pos_buf = Vec::new();
+        //     for i in 0..refr.len() {
+        //         if refr[i] != t_alt[i] {
+        //             // A bit slower, but simpler by union with simple snp
+        //             itoa::write(&mut pos_buf, pos_num + i as u32).unwrap();
 
-                    mnp_alleles.push(SnpType {
-                        position: pos_buf.as_slice(),
-                        reference: refr[i],
-                        alternate: t_alt[i],
-                    })
-                }
-            }
+        //             mnp_alleles.push(SnpType {
+        //                 position: &pos_buf.to_owned(),
+        //                 reference: refr[i],
+        //                 alternate: t_alt[i],
+        //             });
 
-            if mnp_alleles.len() == 0 {
-                variants.push(VariantEnum::None);
-                continue;
-            }
+        //             pos_buf.clear();
+        //         }
+        //     }
 
-            if mnp_alleles.len() == 1 {
-                variants.push(VariantEnum::SNP(mnp_alleles[0]));
-                n_valid_alleles += 1;
-            } else {
-                variants.push(VariantEnum::MNP(mnp_alleles));
-                n_valid_alleles += 1;
-            }
+        //     if mnp_alleles.len() == 0 {
+        //         variants.push(VariantEnum::None);
+        //         continue;
+        //     }
 
-            continue;
-        }
+        //     if mnp_alleles.len() == 1 {
+        //         variants.push(VariantEnum::SNP(mnp_alleles[0]));
+        //         n_valid_alleles += 1;
+        //     } else {
+        //         variants.push(VariantEnum::MNP(MNPType(mnp_alleles)));
+        //         n_valid_alleles += 1;
+        //     }
+
+        //     continue;
+        // }
 
         // Find the allele representation that minimizes padding, while still checking
         // that the site isn't a mixed type (indel + snp) and checking for intercolation
@@ -474,22 +534,7 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
         return SiteEnum::MultiAllelic(variants);
     }
 
-    // A single allele
-
-    // A 1 allele site where the variant was an MNP
-    // They may be sparse or complete, so we empirically check for their presence
-    // If the MNP is really just a snp, there is only 1 allele, and reduces to snp
-    // > 1, these are labeled differently to allow people to jointly consider the effects
-    // of the array of SNPs, since we at the moment consider their effects only independently
-    // (which has advantages for CADD, phyloP, phastCons, clinvar, etc reporting)
-    // SiteEnum::MonoAllelic
-    match variants[0] {
-        VariantEnum::SNP(v) => SiteEnum::MonoAllelic(VariantEnum::SNP(v)),
-        VariantEnum::DEL(v) => SiteEnum::MonoAllelic(VariantEnum::DEL(v)),
-        VariantEnum::INS(v) => SiteEnum::MonoAllelic(VariantEnum::INS(v)),
-        VariantEnum::MNP(v) => SiteEnum::MonoAllelic(VariantEnum::MNP(v)),
-        VariantEnum::None => SiteEnum::None,
-    }
+    SiteEnum::MonoAllelic(variants.pop().unwrap())
 }
 
 fn write_samples_type(
@@ -851,7 +896,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
         match &alleles {
             SiteEnum::None => continue,
-            SiteEnum::MonoAllelic(allele) => match allele {
+            SiteEnum::MonoAllelic(allele) => {
                 if n_samples > 0 && ac[0] == 0 {
                     continue;
                 }
@@ -859,69 +904,29 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 write_chrom(&mut buffer, &chrom);
                 buffer.push(b'\t');
 
-                VariantEnum::SNP(v) => {
-                    buffer.extend_from_slice(v.position);
-                    buffer.push(b'\t');
-                    buffer.extend_from_slice(SNP);
-                    buffer.push(b'\t');
-                    buffer.push(v.reference);
-                    buffer.push(b'\t');
-                    buffer.push(v.alternate);
-                    buffer.push(b'\t');
-                    buffer.push(TSTV[v.reference as usize][v.alternate as usize]);
-                    buffer.push(b'\t');\
-                },
-                VariantEnum::DEL(v) => {
+                allele.write_to_buf(&mut buffer, &mut bytes, false);
 
-                
+                if n_samples > 0 {
+                    write_samples(
+                        header,
+                        &mut buffer,
+                        &hets[0],
+                        &homs[0],
+                        &missing,
+                        effective_samples,
+                        n_samples,
+                        ac[0],
+                        an,
+                        &mut bytes,
+                        &mut f_buf,
+                    );
+                } else {
+                    write_samples_empty(&mut buffer);
+                }
 
-                write_int(&mut buffer, v.position, &mut bytes);
-                buffer.push(b'\t');
-                buffer.extend_from_slice(DEL);
-                buffer.push(b'\t');
-                buffer.push(v.reference);
-                buffer.push(b'\t');
-                write_int(&mut buffer, v.alternate, &mut bytes);
-                buffer.push(b'\t');
-                buffer.push(NOT_TSTV);
                 buffer.push(b'\t');
             }
-            VariantEnum::INS(v) => {
-                buffer.extend_from_slice(v.position);
-                buffer.push(b'\t');
-                buffer.extend_from_slice(INS);
-                buffer.push(b'\t');
-                buffer.push(v.reference);
-                buffer.push(b'\t');
-                buffer.push(b'+');
-                buffer.extend_from_slice(v.alternate);
-                buffer.push(b'\t');
-                buffer.push(NOT_TSTV);
-                buffer.push(b'\t');
-            }
-
-            if n_samples > 0 {
-                        write_samples(
-                            header,
-                            &mut buffer,
-                            &hets[0],
-                            &homs[0],
-                            &missing,
-                            effective_samples,
-                            n_samples,
-                            ac[0],
-                            an,
-                            &mut bytes,
-                            &mut f_buf,
-                        );
-                    } else {
-                        write_samples_empty(&mut buffer);
-                    }
-                    buffer.push(b'\t');
-        },
-            
-        
-        SiteEnum::MultiAllelic(variants) => {
+            SiteEnum::MultiAllelic(variants) => {
                 for i in 0..variants.len() {
                     if n_samples > 0 && ac[i] == 0 {
                         continue;
@@ -933,72 +938,8 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                     write_chrom(&mut buffer, &chrom);
                     buffer.push(b'\t');
 
-                    match &variants[i] {
-                        VariantEnum::None => {
-                            continue;
-                        }
-                        VariantEnum::SNP(v) => {
-                            buffer.extend_from_slice(v.position);
-                            buffer.push(b'\t');
-                            buffer.extend_from_slice(MULTI);
-                            buffer.push(b'\t');
-                            buffer.push(v.reference);
-                            buffer.push(b'\t');
-                            itoa::write(&mut bytes, v.alternate).unwrap();
-                            buffer.extend_from_slice(&bytes);
-                            bytes.clear();
+                    variants[i].write_to_buf(&mut buffer, &mut bytes, false);
 
-                            buffer.push(b'\t');
-                            buffer.push(NOT_TSTV)
-                            buffer.push(b'\t');
-                        }
-                        AlleleTypes::INS(v) | AlleleTypes::DEL(v) => {
-                            itoa::write(&mut bytes, v.position).unwrap();
-                            buffer.extend_from_slice(&bytes);
-                            bytes.clear();
-
-                            buffer.push(b'\t');
-
-                            buffer.extend_from_slice(SITE_TYPES[*site_type_idx as usize]);
-                            buffer.push(b'\t');
-                            buffer.push(v.reference);
-                            buffer.push(b'\t');
-                            buffer.extend_from_slice(&v.alternate);
-                            bytes.clear();
-
-                            buffer.push(b'\t');
-                            buffer.push(NOT_TSTV);
-                            buffer.push(b'\t');
-                        }
-                        AlleleTypes::MNP(v) => {
-                            for mnp_part in v {
-                                itoa::write(&mut bytes, mnp_part.position).unwrap();
-                                buffer.extend_from_slice(&bytes);
-                                bytes.clear();
-
-                                buffer.push(b'\t');
-
-                                buffer.extend_from_slice(SITE_TYPES[*site_type_idx as usize]);
-                                buffer.push(b'\t');
-                                buffer.push(mnp_part.reference);
-                                buffer.push(b'\t');
-                                itoa::write(&mut bytes, mnp_part.alternate).unwrap();
-                                buffer.extend_from_slice(&bytes);
-                                bytes.clear();
-
-                                buffer.push(b'\t');
-                                if *site_type_idx == MULTI_IDX {
-                                    buffer.push(NOT_TSTV)
-                                } else {
-                                    buffer.push(
-                                        TSTV[mnp_part.reference as usize]
-                                            [mnp_part.alternate as usize],
-                                    )
-                                }
-                                buffer.push(b'\t');
-                            }
-                        }
-                    }
                     if n_samples > 0 {
                         write_samples(
                             header,
@@ -1019,6 +960,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 }
                 buffer.push(b'\t');
             }
+        }
         // vcfPos
         buffer.extend_from_slice(pos);
         buffer.push(b'\n');
