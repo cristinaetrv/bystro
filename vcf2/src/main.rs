@@ -703,7 +703,7 @@ fn append_hom_het_multi<'a>(
 }
 
 #[allow(clippy::cognitive_complexity)]
-fn process_lines(n_samples: u32, rows: &[Vec<u8>]) -> usize {
+fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
     let mut homs: Vec<Vec<u32>> = Vec::new();
     let mut hets: Vec<Vec<u32>> = Vec::new();
 
@@ -718,7 +718,6 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) -> usize {
     allowed_filters.insert(b"PASS", true);
 
     let excluded_filters: HashMap<&[u8], bool> = HashMap::new();
-    let mut n_count = 0;
     let mut simple_gt = false;
 
     let mut chrom: &[u8] = b"";
@@ -741,7 +740,6 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) -> usize {
 
     'row_loop: for row in rows {
         alleles = SiteEnum::None;
-        n_count += 1;
 
         'field_loop: for (idx, field) in row.split(|byt| *byt == b'\t').enumerate() {
             if idx == CHROM_IDX {
@@ -986,8 +984,6 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) -> usize {
     if !buffer.is_empty() {
         io::stdout().write_all(&buffer).unwrap();
     }
-
-    n_count
 }
 
 fn main() -> Result<(), io::Error> {
@@ -1024,19 +1020,13 @@ fn main() -> Result<(), io::Error> {
     for _i in 0..n_cpus {
         let r = r1.clone();
 
-        threads.push(thread::spawn(move || {
-            let mut n_count: usize = 0;
+        threads.push(thread::spawn(move || loop {
+            let message: Vec<Vec<u8>> = match r.recv() {
+                Ok(v) => v,
+                Err(_) => break,
+            };
 
-            loop {
-                let message: Vec<Vec<u8>> = match r.recv() {
-                    Ok(v) => v,
-                    Err(_) => break,
-                };
-
-                n_count += process_lines(n_samples, &message);
-            }
-
-            n_count
+            process_lines(n_samples, &message);
         }));
     }
 
@@ -1044,7 +1034,6 @@ fn main() -> Result<(), io::Error> {
     let mut len;
     let mut lines: Vec<Vec<u8>> = Vec::with_capacity(max_lines);
     let mut buf = Vec::with_capacity(48 * 1024 * 1024);
-    // let mut n_count = 0;
 
     loop {
         // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
@@ -1061,19 +1050,15 @@ fn main() -> Result<(), io::Error> {
         buf.clear();
 
         if lines.len() == max_lines {
-            // n_count += lines.len();
             s1.send(lines).unwrap();
             lines = Vec::with_capacity(max_lines);
         }
     }
     drop(s1);
 
-    // let mut total = 0;
     for thread in threads {
         thread.join().unwrap();
     }
-
-    // assert_eq!(total, n_count);
 
     return Ok(());
 }
