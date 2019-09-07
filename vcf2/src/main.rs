@@ -10,7 +10,6 @@ use hashbrown::HashMap;
 use itoa;
 use memchr::memchr;
 use num_cpus;
-use phf::phf_map;
 
 use std::sync::Arc;
 
@@ -349,13 +348,6 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
         }
 
         if refr.len() == 1 {
-            if t_alt[0] != refr[0] {
-                // TODO: grab chromosome in message, store number skipped
-                // eprint!("{:?}: skipping: first base of ref didn't match alt: {:?}, {:?}", pos, t_alt, refr);
-                variants.push(VariantEnum::None);
-                continue;
-            }
-
             if t_alt.len() == 1 {
                 variants.push(VariantEnum::SNP(SnpType {
                     position: pos,
@@ -363,6 +355,13 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
                     alternate: t_alt[0],
                 }));
                 n_valid_alleles += 1;
+                continue;
+            }
+            // If it's alt len > 1 and ref len 1, must be ins
+            if t_alt[0] != refr[0] {
+                // TODO: grab chromosome in message, store number skipped
+                // eprint!("{:?}: skipping: first base of ref didn't match alt: {:?}, {:?}", pos, t_alt, refr);
+                variants.push(VariantEnum::None);
                 continue;
             }
 
@@ -567,24 +566,23 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
     SiteEnum::MonoAllelic(variants.pop().unwrap())
 }
 
+#[inline]
 fn write_samples_type(
-    header: &[Vec<u8>],
+    bytes: &mut Vec<u8>,
     samples: &[u32],
     n_samples: f32,
     buffer: &mut Vec<u8>,
     f_buf: &mut [u8; 15],
 ) {
     if samples.is_empty() {
-        buffer.push(b'!');
-        buffer.push(b'\t');
-        buffer.push(b'0');
+        buffer.extend_from_slice(b"!\t0");
         return;
     }
 
-    for (idx, sample_idx) in samples.iter().enumerate() {
-        buffer.extend_from_slice(&header[*sample_idx as usize]);
+    for sample_idx in 0..samples.len() {
+        write_int(buffer, sample_idx, bytes);
 
-        if idx < samples.len() - 1 {
+        if sample_idx < samples.len() - 1 {
             buffer.push(b';');
         }
     }
@@ -594,10 +592,10 @@ fn write_samples_type(
     write_f32(buffer, samples.len() as f32 / n_samples, f_buf);
 }
 
+#[inline(always)]
 fn write_ac_an(buffer: &mut Vec<u8>, ac: u32, an: u32, bytes: &mut Vec<u8>, f_buf: &mut [u8; 15]) {
     if ac == 0 {
-        buffer.push(b'0');
-        buffer.push(b'\t');
+        buffer.extend_from_slice(b"0\t");
     } else {
         write_int(buffer, ac, bytes);
         buffer.push(b'\t');
@@ -607,12 +605,14 @@ fn write_ac_an(buffer: &mut Vec<u8>, ac: u32, an: u32, bytes: &mut Vec<u8>, f_bu
     write_f32(buffer, ac as f32 / an as f32, f_buf);
 }
 
+#[inline(always)]
 fn write_int<T: itoa::Integer>(buffer: &mut Vec<u8>, val: T, mut b: &mut Vec<u8>) {
     itoa::write(&mut b, val).unwrap();
     buffer.extend_from_slice(&b);
     b.clear();
 }
 
+#[inline(always)]
 fn write_f32(buffer: &mut Vec<u8>, val: f32, f_buf: &mut [u8; 15]) {
     unsafe {
         let n = ryu::raw::f2s_buffered_n(val, &mut f_buf[0]);
@@ -622,7 +622,6 @@ fn write_f32(buffer: &mut Vec<u8>, val: f32, f_buf: &mut [u8; 15]) {
 
 #[allow(clippy::too_many_arguments)]
 fn write_samples(
-    header: &[Vec<u8>],
     buffer: &mut Vec<u8>,
     hets: &[u32],
     homs: &[u32],
@@ -634,15 +633,15 @@ fn write_samples(
     bytes: &mut Vec<u8>,
     f_buf: &mut [u8; 15],
 ) {
-    write_samples_type(header, hets, effective_samples, buffer, f_buf);
+    write_samples_type(bytes, hets, effective_samples, buffer, f_buf);
 
     buffer.push(b'\t');
 
-    write_samples_type(header, homs, effective_samples, buffer, f_buf);
+    write_samples_type(bytes, homs, effective_samples, buffer, f_buf);
 
     buffer.push(b'\t');
 
-    write_samples_type(header, missing, n_samples as f32, buffer, f_buf);
+    write_samples_type(bytes, missing, n_samples as f32, buffer, f_buf);
 
     buffer.push(b'\t');
 
@@ -650,23 +649,27 @@ fn write_samples(
 }
 
 fn write_samples_empty(buffer: &mut Vec<u8>) {
-    buffer.push(b'\t');
-
+    // Hets
     buffer.push(b'!');
     buffer.push(b'\t');
 
+    // Homs
     buffer.push(b'!');
     buffer.push(b'\t');
 
+    // Missing
     buffer.push(b'!');
     buffer.push(b'\t');
 
+    // AC
     buffer.push(b'0');
     buffer.push(b'\t');
 
+    // AN
     buffer.push(b'0');
     buffer.push(b'\t');
 
+    // Missingness
     buffer.push(b'0');
 }
 
@@ -687,14 +690,10 @@ fn append_hom_het_multi<'a>(
 ) -> u32 {
     let gtn = usize::from_radix_10(gt);
 
-    eprintln!("GT {}, GTN {:?}", std::str::from_utf8(gt).unwrap(), gtn);
-
     let mut alt_idx = gtn.0;
     if alt_idx > 0 {
         alt_idx -= 1;
     }
-
-    eprintln!("ALT_IDX {}", alt_idx);
 
     match variants[alt_idx as usize] {
         VariantEnum::None => 0,
@@ -935,7 +934,6 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
                 if n_samples > 0 {
                     write_samples(
-                        header,
                         &mut buffer,
                         &hets[0],
                         &homs[0],
@@ -951,7 +949,10 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                     write_samples_empty(&mut buffer);
                 }
 
+                // vcfPos
                 buffer.push(b'\t');
+                buffer.extend_from_slice(pos);
+                buffer.push(b'\n');
             }
             SiteEnum::MultiAllelic(variants) => {
                 for (vidx, variant) in variants.iter().enumerate() {
@@ -959,9 +960,6 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                         continue;
                     }
 
-                    if vidx > 0 {
-                        buffer.push(b'\n');
-                    }
                     write_chrom(&mut buffer, &chrom);
                     buffer.push(b'\t');
 
@@ -969,7 +967,6 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
                     if n_samples > 0 {
                         write_samples(
-                            header,
                             &mut buffer,
                             &hets[vidx],
                             &homs[vidx],
@@ -984,13 +981,14 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                     } else {
                         write_samples_empty(&mut buffer);
                     }
+
+                    // vcfPos
+                    buffer.push(b'\t');
+                    buffer.extend_from_slice(pos);
+                    buffer.push(b'\n');
                 }
-                buffer.push(b'\t');
             }
         }
-        // vcfPos
-        buffer.extend_from_slice(pos);
-        buffer.push(b'\n');
     }
 
     if !buffer.is_empty() {

@@ -13,3 +13,6 @@ atoi = "0.3.1"
 itoa = "0.4.3"
 memchr = "2.2.0"
 ryu = "0.2.7"
+bytelines = "2.2"
+phf = {git = "https://github.com/sfackler/rust-phf.git", features = ["macros", "unicase"]}
+lazy_static = "1.4.0"
