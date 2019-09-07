@@ -10,6 +10,7 @@ use hashbrown::HashMap;
 use itoa;
 use memchr::memchr;
 use num_cpus;
+use phf::phf_map;
 
 use std::sync::Arc;
 
@@ -98,10 +99,10 @@ fn get_header_and_num_eol_chars<T: BufRead>(reader: &mut T) -> (Vec<u8>, usize) 
     let len = buf.len();
 
     if buf[len - 2] == b'\r' {
-        return (buf, 2);
+        return (buf[..len - 2].to_vec(), 2);
     }
 
-    (buf, 1)
+    (buf[..len - 1].to_vec(), 1)
 }
 
 #[inline(always)]
@@ -678,6 +679,32 @@ fn write_chrom(buffer: &mut Vec<u8>, chrom: &[u8]) {
     buffer.extend_from_slice(&chrom);
 }
 
+#[inline]
+fn append_hom_het_multi<'a>(
+    gt: &[u8],
+    variants: &Vec<VariantEnum<'a>>,
+    ac_counts: &mut HashMap<usize, u32>,
+) -> u32 {
+    let gtn = usize::from_radix_10(gt);
+
+    eprintln!("GT {}, GTN {:?}", std::str::from_utf8(gt).unwrap(), gtn);
+
+    let mut alt_idx = gtn.0;
+    if alt_idx > 0 {
+        alt_idx -= 1;
+    }
+
+    eprintln!("ALT_IDX {}", alt_idx);
+
+    match variants[alt_idx as usize] {
+        VariantEnum::None => 0,
+        _ => {
+            *ac_counts.entry(alt_idx).or_insert(0) += 1;
+            1
+        }
+    }
+}
+
 #[allow(clippy::cognitive_complexity)]
 fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
     let n_samples = if header.len() > 9 {
@@ -701,7 +728,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
     let excluded_filters: HashMap<&[u8], bool> = HashMap::new();
     let mut n_count = 0;
-    // let mut simple_gt = false;
+    let mut simple_gt = false;
 
     let mut chrom: &[u8] = b"";
     let mut pos: &[u8] = b"";
@@ -712,12 +739,14 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
 
     let mut bytes = Vec::new();
     let mut f_buf: [u8; 15];
+
     unsafe {
         f_buf = std::mem::uninitialized();
     }
 
     let mut effective_samples: f32;
     let mut alleles: SiteEnum;
+    let mut gt_range: &[u8];
 
     'row_loop: for row in rows {
         alleles = SiteEnum::None;
@@ -782,62 +811,39 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 continue;
             }
 
+            if idx == FORMAT_IDX {
+                simple_gt = memchr(b':', field) == None;
+                continue;
+            }
+
             if idx > FORMAT_IDX {
+                if simple_gt {
+                    gt_range = field;
+                } else {
+                    // TODO: Don't rely on format?
+                    let end = memchr(b':', field).unwrap();
+                    gt_range = &field[0..end];
+                }
+
                 match &alleles {
                     SiteEnum::MultiAllelic(variants) => {
                         let mut local_alt_indices_counts = HashMap::new();
                         let mut local_an_count = 0;
-                        let mut gt: Vec<u8> = Vec::new();
-                        for &chr in field.iter() {
-                            if chr == b'/' || chr == b'|' || chr == b':' {
-                                if gt[0] == b'0' {
-                                    local_an_count += 1;
-
-                                    if chr == b':' {
-                                        break;
-                                    }
-
-                                    gt.clear();
-                                    continue;
-                                }
-
-                                let gtn = usize::from_radix_10(&gt);
-
-                                if gtn.1 == 0 {
-                                    eprintln!(
-                                        "{:?}:{:?}: skipping: couldn't parse genotype {:?} for sample {:?}",
-                                        chrom, pos, gt, header[idx]
-                                    );
-
-                                    continue 'row_loop;
-                                }
-
-                                let alt_idx = gtn.0 - 1;
-                                // maybe prepended with MNP-, and then deconvolve when writing
-                                // Currently we're counting against an
-                                // TODO: We can't just index into local_ac_count
-                                match variants[alt_idx as usize] {
-                                    VariantEnum::None => continue,
-                                    _ => {
-                                        local_an_count += 1;
-                                        *local_alt_indices_counts.entry(alt_idx).or_insert(0) += 1;
-                                    }
-                                }
-
-                                if chr == b':' {
-                                    break;
-                                }
-
-                                gt.clear();
-                            }
-
-                            if chr == b'.' {
+                        for gt in gt_range.split(|ch| *ch == b'|' || *ch == b'/') {
+                            if gt == b"." {
                                 // A single missing genotype likely means the call is inaccurate
                                 missing.push(idx as u32);
                                 continue 'field_loop;
                             }
 
-                            gt.push(chr);
+                            if gt == b"0" {
+                                // A single missing genotype likely means the call is inaccurate
+                                local_an_count += 1;
+                                continue;
+                            }
+
+                            local_an_count +=
+                                append_hom_het_multi(&gt, &variants, &mut local_alt_indices_counts);
                         }
 
                         an += local_an_count as u32;
@@ -852,29 +858,35 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                         }
                     }
                     _ => {
-                        if field.len() == 1 || field[1] == b':' {
-                            if field[0] == b'0' {
+                        if gt_range.len() == 1 {
+                            if gt_range[0] == b'0' {
                                 an += 1;
-                            } else if field[0] == b'1' {
+                            } else if gt_range[0] == b'1' {
                                 an += 1;
                                 ac[0] += 1;
                                 homs[0].push(idx as u32);
-                            } else {
+                            } else if gt_range[0] == b'.' {
                                 missing.push(idx as u32);
+                            } else {
+                                panic!("Genotype must be 0, 1, or .")
                             }
 
                             continue;
                         }
 
-                        if field[0] == b'0' {
-                            if field[2] == b'0' {
+                        if gt_range[0] == b'.' || gt_range[2] == b'.' {
+                            missing.push(idx as u32);
+                        }
+
+                        if gt_range[0] == b'0' {
+                            if gt_range[2] == b'0' {
                                 an += 2;
-                            } else if field[2] == b'1' {
+                            } else if gt_range[2] == b'1' {
                                 an += 2;
                                 ac[0] += 1;
                                 hets[0].push(idx as u32);
                             } else {
-                                missing.push(idx as u32);
+                                panic!("Genotype must be 0, 1, or .")
                             }
 
                             continue;
@@ -890,7 +902,7 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                                 ac[0] += 2;
                                 homs[0].push(idx as u32);
                             } else {
-                                missing.push(idx as u32);
+                                panic!("Genotype must be 0, 1, or .")
                             }
 
                             continue;
@@ -942,29 +954,29 @@ fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
                 buffer.push(b'\t');
             }
             SiteEnum::MultiAllelic(variants) => {
-                for i in 0..variants.len() {
-                    if n_samples > 0 && ac[i] == 0 {
+                for (vidx, variant) in variants.iter().enumerate() {
+                    if n_samples > 0 && ac[vidx] == 0 {
                         continue;
                     }
 
-                    if i > 0 {
+                    if vidx > 0 {
                         buffer.push(b'\n');
                     }
                     write_chrom(&mut buffer, &chrom);
                     buffer.push(b'\t');
 
-                    variants[i].write_to_buf(&mut buffer, &mut bytes, Some(MULTI));
+                    variant.write_to_buf(&mut buffer, &mut bytes, Some(MULTI));
 
                     if n_samples > 0 {
                         write_samples(
                             header,
                             &mut buffer,
-                            &hets[i],
-                            &homs[i],
+                            &hets[vidx],
+                            &homs[vidx],
                             &missing,
                             effective_samples,
                             n_samples,
-                            ac[i],
+                            ac[vidx],
                             an,
                             &mut bytes,
                             &mut f_buf,
@@ -1036,7 +1048,7 @@ fn main() -> Result<(), io::Error> {
     let mut len;
     let mut lines: Vec<Vec<u8>> = Vec::with_capacity(max_lines);
     let mut buf = Vec::with_capacity(48 * 1024 * 1024);
-    let mut n_count = 0;
+    // let mut n_count = 0;
 
     loop {
         // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
@@ -1049,24 +1061,23 @@ fn main() -> Result<(), io::Error> {
             break;
         }
 
-        // TOOD read end of line number of characters from header
         lines.push(buf[..len - n_eol_chars].to_vec());
         buf.clear();
 
         if lines.len() == max_lines {
-            n_count += lines.len();
+            // n_count += lines.len();
             s1.send(lines).unwrap();
             lines = Vec::with_capacity(max_lines);
         }
     }
     drop(s1);
 
-    let mut total = 0;
+    // let mut total = 0;
     for thread in threads {
-        total += thread.join().unwrap();
+        thread.join().unwrap();
     }
 
-    assert_eq!(total, n_count);
+    // assert_eq!(total, n_count);
 
     return Ok(());
 }
