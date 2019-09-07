@@ -11,7 +11,6 @@ use itoa;
 use memchr::memchr;
 use num_cpus;
 
-#[macro_use]
 extern crate log;
 
 const CHROM_IDX: usize = 0;
@@ -1000,6 +999,42 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
     }
 }
 
+struct Header<'a> {
+    samples: Vec<&'a [u8]>,
+}
+
+impl<'a> Header<'a> {
+    fn new(head: &'a [u8], _write_sample_names: bool) -> Header<'a> {
+        let header: Vec<&'a [u8]> = head.split(|b| *b == b'\t').collect();
+
+        if header.len() == FORMAT_IDX + 1 {
+            panic!("When genotypes present, we expect samples after FORMAT (10 fields minimum)")
+        }
+
+        if header.len() < FORMAT_IDX + 1 {
+            return Header {
+                samples: Vec::new(),
+            };
+        }
+
+        Header {
+            samples: header[FORMAT_IDX + 1..].to_vec(),
+        }
+    }
+
+    fn get_sample_str(&self) -> String {
+        self.samples
+            .iter()
+            .map(|sample| std::str::from_utf8(sample).unwrap())
+            .collect::<Vec<&str>>()
+            .join("\n")
+    }
+
+    fn get_output_header(&self) -> &[u8] {
+        b"chrom\tpos\ttype\tref\talt\ttrTv\theterozygotes\theterozygosity\thomozygotes\thomozygosity\tmissingGenos\tmissingness\tac\tan\tsampleMaf\tvcfPos\n"
+    }
+}
+
 fn main() -> Result<(), io::Error> {
     let (s1, r1) = unbounded();
     let n_cpus = num_cpus::get();
@@ -1009,26 +1044,13 @@ fn main() -> Result<(), io::Error> {
 
     let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut stdin_lock);
 
-    let mut header: Vec<&str> = Vec::new();
-    for field in head.split(|b| *b == b'\t') {
-        header.push(std::str::from_utf8(field).unwrap())
-    }
+    let header = Header::new(&head, false);
 
-    if header.len() == 9 {
-        info!("Found 9 header fields. When genotypes present, we expect 1+ samples after FORMAT (10 fields minimum)")
-    }
-
-    let n_samples: u32;
     // TODO: print header programmatically
-    io::stdout().write_all(b"chrom\tpos\ttype\tref\talt\ttrTv\theterozygotes\theterozygosity\thomozygotes\thomozygosity\tmissingGenos\tmissingness\tac\tan\tsampleMaf\tvcfPos\n")?;
-    if header.len() < 10 {
-        std::fs::write("sample-list.tsv", "")?;
-        n_samples = 0;
-    } else {
-        n_samples = (header.len() - 9) as u32;
-        std::fs::write("sample-list.tsv", header[9..header.len()].join("\n") + "\n")?;
-    }
+    io::stdout().write_all(header.get_output_header())?;
+    std::fs::write("sample-list.tsv", header.get_sample_str() + "\n")?;
 
+    let n_samples = header.samples.len() as u32;
     let mut threads = vec![];
 
     for _i in 0..n_cpus {
