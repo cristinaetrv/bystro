@@ -131,7 +131,7 @@ fn filter_passes(
         && (excluded_filters.len() == 0 || !excluded_filters.contains_key(filter_field))
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct SnpType<'a> {
     position: &'a [u8],
     alternate: u8,
@@ -159,7 +159,7 @@ impl<'a> SnpType<'a> {
         buffer.push(b'\t');
     }
 }
-
+#[derive(Debug)]
 struct DelType {
     position: u32,
     alternate: i32,
@@ -185,7 +185,7 @@ impl DelType {
         buffer.push(b'\t');
     }
 }
-
+#[derive(Debug)]
 struct InsType<'a> {
     position: u32,
     alternate: &'a [u8],
@@ -212,7 +212,7 @@ impl<'a> InsType<'a> {
         buffer.push(b'\t');
     }
 }
-
+#[derive(Debug)]
 struct MNPType {
     positions: Vec<u32>,
     alternates: Vec<u8>,
@@ -232,7 +232,7 @@ impl MNPType {
         let site_type: &[u8] =
             site_type_override.unwrap_or_else(|| if length == 1 { SNP } else { MNP });
 
-        for i in 0..length - 1 {
+        for i in 0..length {
             write_int(buffer, self.positions[i], itoa_buffer);
             buffer.push(b'\t');
             buffer.extend_from_slice(site_type);
@@ -252,6 +252,7 @@ impl MNPType {
     }
 }
 
+#[derive(Debug)]
 enum VariantEnum<'a> {
     SNP(SnpType<'a>),
     INS(InsType<'a>),
@@ -494,12 +495,19 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
             // and we want to keep the last reference base
             // The ref is ref[2 - 1] or ref[1]
             offset = { refr_len + r_idx } as usize;
-
-            // TODO: DO we need this check
-            // if refr[0..offset] != t_alt[0..offset] {
-            //     println!("WTF");
-            //     continue;
+            // if refr.len() <= offset || t_alt.len() <= offset {
+            //     eprintln!(
+            //         "offset {} r_idx {} refr {} alt {}",
+            //         offset,
+            //         r_idx,
+            //         std::str::from_utf8(refr).unwrap(),
+            //         std::str::from_utf8(t_alt).unwrap()
+            //     );
             // }
+            if refr[..offset - 1] != t_alt[..offset - 1] {
+                // eprintln!("MIxe")
+                continue;
+            }
 
             // position is offset by len(ref) + 1 - rIdx
             // ex1: alt: TAGCTT ref: TAT
@@ -535,6 +543,7 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
 
         // Just like insertion, but try to match all bases from 1 base downstream of tAlt to ref
         // let mut r_idx = 0;
+        r_idx = 0;
         while talt_len + r_idx > 1
             && refr_len + r_idx > 0
             && t_alt[{ talt_len + r_idx - 1 } as usize] == refr[{ refr_len + r_idx - 1 } as usize]
@@ -543,6 +552,19 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
         }
 
         offset = { talt_len + r_idx } as usize;
+        // if refr.len() <= offset || t_alt.len() <= offset {
+        //     eprintln!(
+        //         "offset {} r_idx {} refr {} alt {}",
+        //         offset,
+        //         r_idx,
+        //         std::str::from_utf8(refr).unwrap(),
+        //         std::str::from_utf8(t_alt).unwrap()
+        //     );
+        // }
+        if refr[..offset - 1] != t_alt[..offset - 1] {
+            // eprintln!("MIxe")
+            continue;
+        }
 
         // reference: we want the base after the last shared
         variants.push(VariantEnum::DEL(DelType {
@@ -577,10 +599,11 @@ fn write_samples_type(
         return;
     }
 
-    for sample_idx in 0..samples.len() {
+    let last_idx = samples.len() - 1;
+    for (idx, &sample_idx) in samples.iter().enumerate() {
         write_int(buffer, sample_idx, bytes);
 
-        if sample_idx < samples.len() - 1 {
+        if idx < last_idx {
             buffer.push(b';');
         }
     }
@@ -814,6 +837,8 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
                     gt_range = &field[0..end];
                 }
 
+                let sample_idx = idx - 9;
+
                 match &alleles {
                     SiteEnum::MultiAllelic(variants) => {
                         let mut local_alt_indices_counts = HashMap::new();
@@ -821,7 +846,7 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
                         for gt in gt_range.split(|ch| *ch == b'|' || *ch == b'/') {
                             if gt == b"." {
                                 // A single missing genotype likely means the call is inaccurate
-                                missing.push(idx as u32);
+                                missing.push(sample_idx as u32);
                                 continue 'field_loop;
                             }
 
@@ -840,10 +865,10 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
                             ac[ac_idx] += ac_cnt;
 
                             if local_an_count == ac_cnt {
-                                homs[ac_idx].push(idx as u32);
+                                homs[ac_idx].push(sample_idx as u32);
                                 break;
                             }
-                            hets[ac_idx].push(idx as u32);
+                            hets[ac_idx].push(sample_idx as u32);
                         }
                     }
                     _ => {
@@ -853,9 +878,9 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
                             } else if gt_range[0] == b'1' {
                                 an += 1;
                                 ac[0] += 1;
-                                homs[0].push(idx as u32);
+                                homs[0].push(sample_idx as u32);
                             } else if gt_range[0] == b'.' {
-                                missing.push(idx as u32);
+                                missing.push(sample_idx as u32);
                             } else {
                                 panic!("Genotype must be 0, 1, or .")
                             }
@@ -864,7 +889,7 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
                         }
 
                         if gt_range[0] == b'.' || gt_range[2] == b'.' {
-                            missing.push(idx as u32);
+                            missing.push(sample_idx as u32);
                         }
 
                         if gt_range[0] == b'0' {
@@ -873,7 +898,7 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
                             } else if gt_range[2] == b'1' {
                                 an += 2;
                                 ac[0] += 1;
-                                hets[0].push(idx as u32);
+                                hets[0].push(sample_idx as u32);
                             } else {
                                 panic!("Genotype must be 0, 1, or .")
                             }
@@ -885,11 +910,11 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
                             if field[2] == b'0' {
                                 an += 2;
                                 ac[0] += 1;
-                                hets[0].push(idx as u32);
+                                hets[0].push(sample_idx as u32);
                             } else if field[2] == b'1' {
                                 an += 2;
                                 ac[0] += 2;
-                                homs[0].push(idx as u32);
+                                homs[0].push(sample_idx as u32);
                             } else {
                                 panic!("Genotype must be 0, 1, or .")
                             }
@@ -953,6 +978,10 @@ fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
                     write_chrom(&mut buffer, &chrom);
                     buffer.push(b'\t');
 
+                    // if pos == b"985465" {
+                    //     eprintln!("WRITING {:?}", variant)
+                    // }
+
                     variant.write_to_buf(&mut buffer, &mut bytes, Some(MULTI));
 
                     if n_samples > 0 {
@@ -1011,7 +1040,7 @@ fn main() -> Result<(), io::Error> {
         std::fs::write("sample-list.tsv", "")?;
         n_samples = 0;
     } else {
-        n_samples = header.len() as u32 - 9;
+        n_samples = (header.len() - 9) as u32;
         std::fs::write("sample-list.tsv", header[9..header.len()].join("\n") + "\n")?;
     }
 
