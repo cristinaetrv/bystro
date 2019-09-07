@@ -11,8 +11,6 @@ use itoa;
 use memchr::memchr;
 use num_cpus;
 
-use std::sync::Arc;
-
 #[macro_use]
 extern crate log;
 
@@ -705,13 +703,7 @@ fn append_hom_het_multi<'a>(
 }
 
 #[allow(clippy::cognitive_complexity)]
-fn process_lines(header: &[Vec<u8>], rows: &[Vec<u8>]) -> usize {
-    let n_samples = if header.len() > 9 {
-        header.len() as u32 - 9
-    } else {
-        0
-    };
-
+fn process_lines(n_samples: u32, rows: &[Vec<u8>]) -> usize {
     let mut homs: Vec<Vec<u32>> = Vec::new();
     let mut hets: Vec<Vec<u32>> = Vec::new();
 
@@ -1007,24 +999,30 @@ fn main() -> Result<(), io::Error> {
 
     let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut stdin_lock);
 
-    let header: Arc<Vec<Vec<u8>>> = Arc::new(
-        head.split(|b| *b == b'\t')
-            .map(|sample| sample.to_vec())
-            .collect(),
-    );
+    let mut header: Vec<&str> = Vec::new();
+    for field in head.split(|b| *b == b'\t') {
+        header.push(std::str::from_utf8(field).unwrap())
+    }
 
     if header.len() == 9 {
         info!("Found 9 header fields. When genotypes present, we expect 1+ samples after FORMAT (10 fields minimum)")
     }
 
+    let n_samples: u32;
     // TODO: print header programmatically
     io::stdout().write_all(b"chrom\tpos\ttype\tref\talt\ttrTv\theterozygotes\theterozygosity\thomozygotes\thomozygosity\tmissingGenos\tmissingness\tac\tan\tsampleMaf\tvcfPos\n")?;
+    if header.len() < 10 {
+        std::fs::write("sample-list.tsv", "")?;
+        n_samples = 0;
+    } else {
+        n_samples = header.len() as u32 - 9;
+        std::fs::write("sample-list.tsv", header[9..header.len()].join("\n") + "\n")?;
+    }
 
     let mut threads = vec![];
 
     for _i in 0..n_cpus {
         let r = r1.clone();
-        let header = Arc::clone(&header);
 
         threads.push(thread::spawn(move || {
             let mut n_count: usize = 0;
@@ -1035,7 +1033,7 @@ fn main() -> Result<(), io::Error> {
                     Err(_) => break,
                 };
 
-                n_count += process_lines(&header, &message);
+                n_count += process_lines(n_samples, &message);
             }
 
             n_count
