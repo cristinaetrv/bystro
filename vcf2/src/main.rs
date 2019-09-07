@@ -495,17 +495,11 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
             // and we want to keep the last reference base
             // The ref is ref[2 - 1] or ref[1]
             offset = { refr_len + r_idx } as usize;
-            // if refr.len() <= offset || t_alt.len() <= offset {
-            //     eprintln!(
-            //         "offset {} r_idx {} refr {} alt {}",
-            //         offset,
-            //         r_idx,
-            //         std::str::from_utf8(refr).unwrap(),
-            //         std::str::from_utf8(t_alt).unwrap()
-            //     );
-            // }
-            if refr[..offset - 1] != t_alt[..offset - 1] {
-                // eprintln!("MIxe")
+
+            // TODO: LOG
+            if refr[0..offset] != t_alt[0..offset] {
+                // mixed
+                variants.push(VariantEnum::None);
                 continue;
             }
 
@@ -543,26 +537,17 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
 
         // Just like insertion, but try to match all bases from 1 base downstream of tAlt to ref
         // let mut r_idx = 0;
-        r_idx = 0;
         while talt_len + r_idx > 1
             && refr_len + r_idx > 0
             && t_alt[{ talt_len + r_idx - 1 } as usize] == refr[{ refr_len + r_idx - 1 } as usize]
         {
             r_idx -= 1;
         }
-
+        // TODO: LOG
         offset = { talt_len + r_idx } as usize;
-        // if refr.len() <= offset || t_alt.len() <= offset {
-        //     eprintln!(
-        //         "offset {} r_idx {} refr {} alt {}",
-        //         offset,
-        //         r_idx,
-        //         std::str::from_utf8(refr).unwrap(),
-        //         std::str::from_utf8(t_alt).unwrap()
-        //     );
-        // }
-        if refr[..offset - 1] != t_alt[..offset - 1] {
-            // eprintln!("MIxe")
+        if refr[..offset] != t_alt[..offset] {
+            // mixed
+            variants.push(VariantEnum::None);
             continue;
         }
 
