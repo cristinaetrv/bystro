@@ -2,7 +2,6 @@
 // TODO: Cache genotypes
 use std::io;
 use std::io::prelude::*;
-use std::thread;
 
 use atoi::FromRadix10;
 use crossbeam_channel::unbounded;
@@ -1046,44 +1045,44 @@ impl<'a> Header<'a> {
 fn main() -> Result<(), io::Error> {
     let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut io::stdin().lock());
     let header = Header::new(&head, false);
-
     header.write_output_header(io::stdout());
     header.write_sample_list("sample-list.tsv");
+
     let (s1, r1) = unbounded();
-    let reader_thread = thread::spawn(move || {
-        let max_lines = 48;
-        let mut len;
-        let mut lines: Vec<Vec<u8>> = Vec::with_capacity(max_lines);
-        let mut buf = Vec::with_capacity(48 * 1024 * 1024);
-        let stdin = io::stdin();
-        let mut stdin_lock = std::io::BufReader::with_capacity(48 * 1024 * 1024, stdin.lock());
-        loop {
-            // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
-            len = stdin_lock.read_until(b'\n', &mut buf).unwrap();
-
-            if len == 0 {
-                if lines.len() > 0 {
-                    s1.send(lines).unwrap();
-                }
-                break;
-            }
-
-            lines.push(buf[..len - n_eol_chars].to_vec());
-            buf.clear();
-
-            if lines.len() == max_lines {
-                s1.send(lines).unwrap();
-                lines = Vec::with_capacity(max_lines);
-            }
-        }
-        // force the receivers to close as well
-        drop(s1);
-    });
 
     let n_cpus = num_cpus::get();
     let n_samples = header.samples.len() as u32;
 
     cthread::scope(|scope| {
+        scope.spawn(move |_| {
+            let max_lines = 48;
+            let mut len;
+            let mut lines: Vec<Vec<u8>> = Vec::with_capacity(max_lines);
+            let mut buf = Vec::with_capacity(48 * 1024 * 1024);
+            let stdin = io::stdin();
+            let mut stdin_lock = std::io::BufReader::with_capacity(48 * 1024 * 1024, stdin.lock());
+            loop {
+                // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
+                len = stdin_lock.read_until(b'\n', &mut buf).unwrap();
+
+                if len == 0 {
+                    if lines.len() > 0 {
+                        s1.send(lines).unwrap();
+                    }
+                    break;
+                }
+
+                lines.push(buf[..len - n_eol_chars].to_vec());
+                buf.clear();
+
+                if lines.len() == max_lines {
+                    s1.send(lines).unwrap();
+                    lines = Vec::with_capacity(max_lines);
+                }
+            }
+            // force the receivers to close as well
+            drop(s1);
+        });
         for _ in 0..n_cpus {
             let r = r1.clone();
             // necessary for borrow to work
@@ -1099,8 +1098,6 @@ fn main() -> Result<(), io::Error> {
         }
     })
     .unwrap();
-
-    reader_thread.join().unwrap();
 
     return Ok(());
 }
