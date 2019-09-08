@@ -6,6 +6,7 @@ use std::thread;
 
 use atoi::FromRadix10;
 use crossbeam_channel::unbounded;
+use crossbeam_utils::thread as cthread;
 use hashbrown::HashMap;
 use itoa;
 use memchr::memchr;
@@ -710,7 +711,7 @@ fn append_hom_het_multi<'a>(
 }
 
 #[allow(clippy::cognitive_complexity)]
-fn process_lines(n_samples: u32, rows: &[Vec<u8>]) {
+fn process_lines(n_samples: u32, _header: &Header, rows: &[Vec<u8>]) {
     let mut homs: Vec<Vec<u32>> = Vec::new();
     let mut hets: Vec<Vec<u32>> = Vec::new();
 
@@ -1033,68 +1034,73 @@ impl<'a> Header<'a> {
     fn get_output_header(&self) -> &[u8] {
         b"chrom\tpos\ttype\tref\talt\ttrTv\theterozygotes\theterozygosity\thomozygotes\thomozygosity\tmissingGenos\tmissingness\tac\tan\tsampleMaf\tvcfPos\n"
     }
+    fn write_output_header<T: Write>(&self, mut writer: T) {
+        writer.write_all(self.get_output_header()).unwrap();
+    }
+
+    fn write_sample_list(&self, file_name: &'static str) {
+        std::fs::write(file_name, self.get_sample_str() + "\n").unwrap();
+    }
 }
 
 fn main() -> Result<(), io::Error> {
-    let (s1, r1) = unbounded();
-    let n_cpus = num_cpus::get();
-
-    let stdin = io::stdin();
-    let mut stdin_lock = std::io::BufReader::with_capacity(48 * 1024 * 1024, stdin.lock());
-
-    let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut stdin_lock);
-
+    let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut io::stdin().lock());
     let header = Header::new(&head, false);
 
-    // TODO: print header programmatically
-    io::stdout().write_all(header.get_output_header())?;
-    std::fs::write("sample-list.tsv", header.get_sample_str() + "\n")?;
+    header.write_output_header(io::stdout());
+    header.write_sample_list("sample-list.tsv");
+    let (s1, r1) = unbounded();
+    let reader_thread = thread::spawn(move || {
+        let max_lines = 48;
+        let mut len;
+        let mut lines: Vec<Vec<u8>> = Vec::with_capacity(max_lines);
+        let mut buf = Vec::with_capacity(48 * 1024 * 1024);
+        let stdin = io::stdin();
+        let mut stdin_lock = std::io::BufReader::with_capacity(48 * 1024 * 1024, stdin.lock());
+        loop {
+            // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
+            len = stdin_lock.read_until(b'\n', &mut buf).unwrap();
 
-    let n_samples = header.samples.len() as u32;
-    let mut threads = vec![];
-
-    for _i in 0..n_cpus {
-        let r = r1.clone();
-
-        threads.push(thread::spawn(move || loop {
-            let message: Vec<Vec<u8>> = match r.recv() {
-                Ok(v) => v,
-                Err(_) => break,
-            };
-
-            process_lines(n_samples, &message);
-        }));
-    }
-
-    let max_lines = 48;
-    let mut len;
-    let mut lines: Vec<Vec<u8>> = Vec::with_capacity(max_lines);
-    let mut buf = Vec::with_capacity(48 * 1024 * 1024);
-
-    loop {
-        // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
-        len = stdin_lock.read_until(b'\n', &mut buf)?;
-
-        if len == 0 {
-            if lines.len() > 0 {
-                s1.send(lines).unwrap();
+            if len == 0 {
+                if lines.len() > 0 {
+                    s1.send(lines).unwrap();
+                }
+                break;
             }
-            break;
+
+            lines.push(buf[..len - n_eol_chars].to_vec());
+            buf.clear();
+
+            if lines.len() == max_lines {
+                s1.send(lines).unwrap();
+                lines = Vec::with_capacity(max_lines);
+            }
         }
+        // force the receivers to close as well
+        drop(s1);
+    });
 
-        lines.push(buf[..len - n_eol_chars].to_vec());
-        buf.clear();
+    let n_cpus = num_cpus::get();
+    let n_samples = header.samples.len() as u32;
 
-        if lines.len() == max_lines {
-            s1.send(lines).unwrap();
-            lines = Vec::with_capacity(max_lines);
+    cthread::scope(|scope| {
+        for _ in 0..n_cpus {
+            let r = r1.clone();
+            // necessary for borrow to work
+            let header = &header;
+            scope.spawn(move |_| loop {
+                let message: Vec<Vec<u8>> = match r.recv() {
+                    Ok(v) => v,
+                    Err(_) => break,
+                };
+
+                process_lines(n_samples, &header, &message);
+            });
         }
-    }
-    drop(s1);
+    })
+    .unwrap();
 
-    for thread in threads {
-        thread.join().unwrap();
-    }
+    reader_thread.join().unwrap();
 
     return Ok(());
 }
