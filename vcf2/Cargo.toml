@@ -5,14 +5,13 @@ authors = ["Alex Kotlar <akotlar@bu.edu>"]
 edition = "2018"
 
 [dependencies]
-log = "0.4.6"
-crossbeam-channel = "0.3.8"
+log = "0.4.8"
+crossbeam-channel = "0.3.9"
+crossbeam-utils = "0.6.6"
 num_cpus = "1.10.0"
-hashbrown = "0.3.0"
 atoi = "0.3.1"
-itoa = "0.4.3"
-memchr = "2.2.0"
-ryu = "0.2.7"
-bytelines = "2.2"
-phf = {git = "https://github.com/sfackler/rust-phf.git", features = ["macros", "unicase"]}
+itoa = "0.4.4"
+memchr = "2.2.1"
+ryu = "1.0.0"
 lazy_static = "1.4.0"
+

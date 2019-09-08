@@ -1,13 +1,15 @@
 // TODO: replace panics with proper error handling
 // TODO: Cache genotypes
+use std::collections::HashMap;
 use std::io;
 use std::io::prelude::*;
 
-use atoi::FromRadix10;
 use crossbeam_channel::unbounded;
 use crossbeam_utils::thread as cthread;
-use hashbrown::HashMap;
+
+use atoi::FromRadix10;
 use itoa;
+
 use memchr::memchr;
 use num_cpus;
 
@@ -576,7 +578,7 @@ fn write_samples_type(
     samples: &[u32],
     n_samples: f32,
     buffer: &mut Vec<u8>,
-    f_buf: &mut [u8; 15],
+    f_buf: &mut [u8; 16],
 ) {
     if samples.is_empty() {
         buffer.extend_from_slice(b"!\t0");
@@ -598,7 +600,7 @@ fn write_samples_type(
 }
 
 #[inline(always)]
-fn write_ac_an(buffer: &mut Vec<u8>, ac: u32, an: u32, bytes: &mut Vec<u8>, f_buf: &mut [u8; 15]) {
+fn write_ac_an(buffer: &mut Vec<u8>, ac: u32, an: u32, bytes: &mut Vec<u8>, f_buf: &mut [u8; 16]) {
     if ac == 0 {
         buffer.extend_from_slice(b"0\t");
     } else {
@@ -618,9 +620,10 @@ fn write_int<T: itoa::Integer>(buffer: &mut Vec<u8>, val: T, mut b: &mut Vec<u8>
 }
 
 #[inline(always)]
-fn write_f32(buffer: &mut Vec<u8>, val: f32, f_buf: &mut [u8; 15]) {
+fn write_f32(buffer: &mut Vec<u8>, val: f32, f_buf: &mut [u8; 16]) {
     unsafe {
-        let n = ryu::raw::f2s_buffered_n(val, &mut f_buf[0]);
+        let n = ryu::raw::format32(val, &mut f_buf[0]);
+        debug_assert!(n <= f_buf.len());
         buffer.extend_from_slice(&f_buf[0..n]);
     };
 }
@@ -636,7 +639,7 @@ fn write_samples(
     ac: u32,
     an: u32,
     bytes: &mut Vec<u8>,
-    f_buf: &mut [u8; 15],
+    f_buf: &mut [u8; 16],
 ) {
     write_samples_type(bytes, hets, effective_samples, buffer, f_buf);
 
@@ -735,7 +738,7 @@ fn process_lines(n_samples: u32, _header: &Header, rows: &[Vec<u8>]) {
     let mut buffer = Vec::with_capacity(10_000);
 
     let mut bytes = Vec::new();
-    let mut f_buf: [u8; 15];
+    let mut f_buf: [u8; 16];
 
     unsafe {
         f_buf = std::mem::uninitialized();
