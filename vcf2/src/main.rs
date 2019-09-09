@@ -574,6 +574,7 @@ fn get_alleles<'a>(pos: &'a [u8], refr: &'a [u8], alt: &'a [u8]) -> SiteEnum<'a>
 
 #[inline]
 fn write_samples_type(
+    header: &Header,
     bytes: &mut Vec<u8>,
     samples: &[u32],
     n_samples: f32,
@@ -585,14 +586,7 @@ fn write_samples_type(
         return;
     }
 
-    let last_idx = samples.len() - 1;
-    for (idx, &sample_idx) in samples.iter().enumerate() {
-        write_int(buffer, sample_idx, bytes);
-
-        if idx < last_idx {
-            buffer.push(b';');
-        }
-    }
+    header.write_samples_to_buff(buffer, samples, bytes);
 
     buffer.push(b'\t');
 
@@ -630,6 +624,7 @@ fn write_f32(buffer: &mut Vec<u8>, val: f32, f_buf: &mut [u8; 16]) {
 
 #[allow(clippy::too_many_arguments)]
 fn write_samples(
+    header: &Header,
     buffer: &mut Vec<u8>,
     hets: &[u32],
     homs: &[u32],
@@ -641,15 +636,15 @@ fn write_samples(
     bytes: &mut Vec<u8>,
     f_buf: &mut [u8; 16],
 ) {
-    write_samples_type(bytes, hets, effective_samples, buffer, f_buf);
+    write_samples_type(header, bytes, hets, effective_samples, buffer, f_buf);
 
     buffer.push(b'\t');
 
-    write_samples_type(bytes, homs, effective_samples, buffer, f_buf);
+    write_samples_type(header, bytes, homs, effective_samples, buffer, f_buf);
 
     buffer.push(b'\t');
 
-    write_samples_type(bytes, missing, n_samples as f32, buffer, f_buf);
+    write_samples_type(header, bytes, missing, n_samples as f32, buffer, f_buf);
 
     buffer.push(b'\t');
 
@@ -713,7 +708,7 @@ fn append_hom_het_multi<'a>(
 }
 
 #[allow(clippy::cognitive_complexity)]
-fn process_lines(n_samples: u32, _header: &Header, rows: &[Vec<u8>]) {
+fn process_lines(n_samples: u32, header: &Header, rows: &[Vec<u8>]) {
     let mut homs: Vec<Vec<u32>> = Vec::new();
     let mut hets: Vec<Vec<u32>> = Vec::new();
 
@@ -874,42 +869,69 @@ fn process_lines(n_samples: u32, _header: &Header, rows: &[Vec<u8>]) {
 
                             continue;
                         }
+                        if gt_range.len() == 3 {
+                            if gt_range[0] == b'.' || gt_range[2] == b'.' {
+                                missing.push(sample_idx as u32);
+                            }
 
-                        if gt_range[0] == b'.' || gt_range[2] == b'.' {
-                            missing.push(sample_idx as u32);
-                        }
+                            if gt_range[0] == b'0' {
+                                if gt_range[2] == b'0' {
+                                    an += 2;
+                                } else if gt_range[2] == b'1' {
+                                    an += 2;
+                                    ac[0] += 1;
+                                    hets[0].push(sample_idx as u32);
+                                } else {
+                                    panic!("Genotype must be 0, 1, or .")
+                                }
 
-                        if gt_range[0] == b'0' {
-                            if gt_range[2] == b'0' {
-                                an += 2;
-                            } else if gt_range[2] == b'1' {
-                                an += 2;
-                                ac[0] += 1;
-                                hets[0].push(sample_idx as u32);
-                            } else {
-                                panic!("Genotype must be 0, 1, or .")
+                                continue;
+                            }
+
+                            if field[0] == b'1' {
+                                if field[2] == b'0' {
+                                    an += 2;
+                                    ac[0] += 1;
+                                    hets[0].push(sample_idx as u32);
+                                } else if field[2] == b'1' {
+                                    an += 2;
+                                    ac[0] += 2;
+                                    homs[0].push(sample_idx as u32);
+                                } else {
+                                    panic!("Genotype must be 0, 1, or .")
+                                }
+
+                                continue;
                             }
 
                             continue;
                         }
 
-                        if field[0] == b'1' {
-                            if field[2] == b'0' {
-                                an += 2;
-                                ac[0] += 1;
-                                hets[0].push(sample_idx as u32);
-                            } else if field[2] == b'1' {
-                                an += 2;
-                                ac[0] += 2;
-                                homs[0].push(sample_idx as u32);
-                            } else {
-                                panic!("Genotype must be 0, 1, or .")
+                        let mut local_an_count = 0;
+                        let mut local_ac_count = 0;
+                        for gt in gt_range.split(|ch| *ch == b'|' || *ch == b'/') {
+                            if gt == b"." {
+                                // A single missing genotype likely means the call is inaccurate
+                                missing.push(sample_idx as u32);
+                                continue 'field_loop;
                             }
 
-                            continue;
-                        }
+                            local_an_count += 1;
 
-                        // TODO: Support 3+
+                            if gt == b"1" {
+                                local_ac_count += 1;
+                            }
+                        }
+                        ac[0] += local_ac_count;
+                        an += local_an_count;
+
+                        if local_ac_count == 0 {
+                            continue;
+                        } else if local_ac_count == local_an_count {
+                            homs[0].push(sample_idx as u32);
+                        } else {
+                            hets[0].push(sample_idx as u32);
+                        }
                     }
                 }
             }
@@ -938,6 +960,7 @@ fn process_lines(n_samples: u32, _header: &Header, rows: &[Vec<u8>]) {
 
                 if n_samples > 0 {
                     write_samples(
+                        header,
                         &mut buffer,
                         &hets[0],
                         &homs[0],
@@ -975,6 +998,7 @@ fn process_lines(n_samples: u32, _header: &Header, rows: &[Vec<u8>]) {
 
                     if n_samples > 0 {
                         write_samples(
+                            header,
                             &mut buffer,
                             &hets[vidx],
                             &homs[vidx],
@@ -1006,10 +1030,11 @@ fn process_lines(n_samples: u32, _header: &Header, rows: &[Vec<u8>]) {
 
 struct Header<'a> {
     samples: Vec<&'a [u8]>,
+    use_sample_names: bool,
 }
 
 impl<'a> Header<'a> {
-    fn new(head: &'a [u8], _write_sample_names: bool) -> Header<'a> {
+    fn new(head: &'a [u8], use_sample_names: bool) -> Header<'a> {
         let header: Vec<&'a [u8]> = head.split(|b| *b == b'\t').collect();
 
         if header.len() == FORMAT_IDX + 1 {
@@ -1019,11 +1044,13 @@ impl<'a> Header<'a> {
         if header.len() < FORMAT_IDX + 1 {
             return Header {
                 samples: Vec::new(),
+                use_sample_names: use_sample_names,
             };
         }
 
         Header {
             samples: header[FORMAT_IDX + 1..].to_vec(),
+            use_sample_names: use_sample_names,
         }
     }
 
@@ -1045,11 +1072,38 @@ impl<'a> Header<'a> {
     fn write_sample_list(&self, file_name: &'static str) {
         std::fs::write(file_name, self.get_sample_str() + "\n").unwrap();
     }
+
+    fn write_samples_to_buff(
+        &self,
+        buffer: &mut Vec<u8>,
+        sample_idxs: &[u32],
+        bytes: &mut Vec<u8>,
+    ) {
+        let last_idx = sample_idxs.len() - 1;
+
+        if self.use_sample_names {
+            for (idx, &sample_idx) in sample_idxs.iter().enumerate() {
+                buffer.extend_from_slice(self.samples[sample_idx as usize]);
+
+                if idx < last_idx {
+                    buffer.push(b';');
+                }
+            }
+        } else {
+            for (idx, &sample_idx) in sample_idxs.iter().enumerate() {
+                write_int(buffer, sample_idx, bytes);
+
+                if idx < last_idx {
+                    buffer.push(b';');
+                }
+            }
+        }
+    }
 }
 
 fn main() -> Result<(), io::Error> {
     let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut io::stdin().lock());
-    let header = Header::new(&head, false);
+    let header = Header::new(&head, true);
     header.write_output_header(io::stdout());
     header.write_sample_list("sample-list.tsv");
 
