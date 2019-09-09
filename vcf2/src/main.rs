@@ -1109,9 +1109,6 @@ fn main() -> Result<(), io::Error> {
 
     let (s1, r1) = unbounded();
 
-    let n_cpus = num_cpus::get();
-    let n_samples = header.samples.len() as u32;
-
     cthread::scope(|scope| {
         scope.spawn(move |_| {
             let max_lines = 48;
@@ -1142,7 +1139,9 @@ fn main() -> Result<(), io::Error> {
             // force the receivers to close as well
             drop(s1);
         });
-        for _ in 0..n_cpus {
+
+        let n_samples = header.samples.len() as u32;
+        for _ in 0..num_cpus::get() {
             let r = r1.clone();
             // necessary for borrow to work
             let header = &header;
