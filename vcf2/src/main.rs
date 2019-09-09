@@ -12,6 +12,7 @@ use itoa;
 
 use memchr::memchr;
 use num_cpus;
+use regex::Regex;
 
 extern crate log;
 
@@ -1101,8 +1102,20 @@ impl<'a> Header<'a> {
     }
 }
 
+use lz4::Decoder;
+
 fn main() -> Result<(), io::Error> {
-    let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut io::stdin().lock());
+    let args: Vec<String> = std::env::args().collect();
+    println!("{:?}", args);
+    let file_name = &args[1];
+
+    let extension = file_name.rsplit('.').nth(0).unwrap();
+    eprintln!("EXTENSION {}", extension);
+    let input_file = std::fs::File::open(&args[1])?;
+    let decoder = Decoder::new(input_file)?;
+    let mut reader = std::io::BufReader::with_capacity(48 * 1024 * 1024, decoder);
+
+    let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut reader);
     let header = Header::new(&head, true);
     header.write_output_header(io::stdout());
     header.write_sample_list("sample-list.tsv");
@@ -1114,12 +1127,11 @@ fn main() -> Result<(), io::Error> {
             let max_lines = 48;
             let mut len;
             let mut lines: Vec<Vec<u8>> = Vec::with_capacity(max_lines);
-            let mut buf = Vec::with_capacity(48 * 1024 * 1024);
-            let stdin = io::stdin();
-            let mut stdin_lock = std::io::BufReader::with_capacity(48 * 1024 * 1024, stdin.lock());
+            let mut buf = Vec::with_capacity(1 * 1024 * 1024);
+
             loop {
                 // https://stackoverflow.com/questions/43028653/rust-file-i-o-is-very-slow-compared-with-c-is-something-wrong
-                len = stdin_lock.read_until(b'\n', &mut buf).unwrap();
+                len = reader.read_until(b'\n', &mut buf).unwrap();
 
                 if len == 0 {
                     if lines.len() > 0 {
