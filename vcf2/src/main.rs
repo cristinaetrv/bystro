@@ -10,7 +10,8 @@ use crossbeam_utils::thread as cthread;
 use atoi::FromRadix10;
 use itoa;
 
-use lz4::Decoder;
+// use lz4::Decoder;
+use flate2::read::MultiGzDecoder;
 use memchr::memchr;
 use num_cpus;
 
@@ -1118,7 +1119,7 @@ fn main() -> Result<(), io::Error> {
     let args: Vec<String> = std::env::args().collect();
 
     let input_file = std::fs::File::open(&args[1])?;
-    let decoder = Decoder::new(input_file)?;
+    let decoder = MultiGzDecoder::new(input_file);
     let mut reader = std::io::BufReader::with_capacity(16 * 1024 * 1024, decoder);
 
     let (head, n_eol_chars) = get_header_and_num_eol_chars(&mut reader);
