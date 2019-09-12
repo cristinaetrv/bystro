@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io;
 use std::io::prelude::*;
 
-use crossbeam_channel::unbounded;
+use crossbeam_channel::bounded;
 use crossbeam_utils::thread as cthread;
 
 use atoi::FromRadix10;
@@ -665,16 +665,28 @@ fn write_samples_empty(buffer: &mut Vec<u8>) {
     buffer.push(b'!');
     buffer.push(b'\t');
 
+    // heterozygosity
+    buffer.push(b'!');
+    buffer.push(b'\t');
+
+    // homozygosity
+    buffer.push(b'!');
+    buffer.push(b'\t');
+
+    // missingngess
+    buffer.push(b'!');
+    buffer.push(b'\t');
+
     // AC
-    buffer.push(b'0');
+    buffer.push(b'!');
     buffer.push(b'\t');
 
     // AN
-    buffer.push(b'0');
+    buffer.push(b'!');
     buffer.push(b'\t');
 
     // Missingness
-    buffer.push(b'0');
+    buffer.push(b'!');
 }
 
 #[inline]
@@ -1114,7 +1126,7 @@ fn main() -> Result<(), io::Error> {
     header.write_output_header(io::stdout());
     header.write_sample_list("sample-list.tsv");
 
-    let (s1, r1) = unbounded();
+    let (s1, r1) = bounded(1e4 as usize);
 
     cthread::scope(|scope| {
         scope.spawn(move |_| {
