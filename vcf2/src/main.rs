@@ -759,6 +759,7 @@ fn process_lines(n_samples: u32, header: &Header, rows: &[Vec<u8>]) {
 
     'row_loop: for row in rows {
         alleles = SiteEnum::None;
+        let mut gq_pos: Option<usize> = None;
 
         'field_loop: for (idx, field) in row.split(|byt| *byt == b'\t').enumerate() {
             if idx == CHROM_IDX {
@@ -820,7 +821,27 @@ fn process_lines(n_samples: u32, header: &Header, rows: &[Vec<u8>]) {
             }
 
             if idx == FORMAT_IDX {
-                simple_gt = memchr(b':', field) == None;
+                match memchr(b':', field) {
+                    Some(pos) => {
+                        if &field[pos + 1..pos + 2] == b"GQ" {
+                            gq_pos = Some(pos + 1);
+                        } else {
+                            for (idx, val) in field[pos + 1..].split(|x| *x == b':').enumerate() {
+                                if val == b"GQ" {
+                                    gq_pos = Some(idx);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    None => simple_gt = true,
+                }
+
+                match gq_pos {
+                    Some(pos) => eprintln!("GQ POS: {}", pos),
+                    None => {}
+                }
+
                 continue;
             }
 
@@ -831,6 +852,15 @@ fn process_lines(n_samples: u32, header: &Header, rows: &[Vec<u8>]) {
                     // TODO: Don't rely on format?
                     let end = memchr(b':', field).unwrap();
                     gt_range = &field[0..end];
+
+                    match gq_pos {
+                        Some(idx) => {
+                            let gq = field[pos + 1..].split(|x| *x == b':').nth(gq_pos)
+
+                            eprint!("IT IS {}", gq)
+                        }
+                        None => {}
+                    }
                 }
 
                 let sample_idx = idx - 9;
