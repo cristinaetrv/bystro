@@ -854,10 +854,10 @@ fn process_lines(n_samples: u32, header: &Header, rows: &[Vec<u8>]) {
                     gt_range = &field[0..end];
 
                     match gq_pos {
-                        Some(idx) => {
-                            let gq = field[pos + 1..].split(|x| *x == b':').nth(gq_pos)
+                        Some(offset) => {
+                            let gq = field[end + 1..].split(|x| *x == b':').nth(offset).unwrap();
 
-                            eprint!("IT IS {}", gq)
+                            eprintln!("IT IS {:?}", gq);
                         }
                         None => {}
                     }
