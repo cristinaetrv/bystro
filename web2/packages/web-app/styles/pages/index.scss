@@ -1,8 +1,8 @@
-@import "../variables/margin.scss";
+@import "../variables.scss";
 
-#site-theme {
+#theme-site {
   #index {
-    .subtitle + .subtitle {
+    .subtitle+.subtitle {
       margin-top: $margin / 2;
     }
   }
