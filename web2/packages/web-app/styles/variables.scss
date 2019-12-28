@@ -1,0 +1,34 @@
+/* Typography */
+$black: #212121;
+$white: #fff;
+$lightest-gray: #efefef;
+$light-gray: #d4d4d4;
+$gray: #212121;
+$light-blue: #428bca;
+$blue: #36465d;
+$light-red: #c24e4f;
+$red: #a54243;
+$weight-light: 100;
+$weight-normal: 300;
+$weight-medium: 400;
+$weight-heavy: 500;
+$font-size: .875rem;
+$subtitle2-size: .75rem;
+
+
+/* Dimensions */
+$margin: $font-size;
+$display-width: 1920px;
+$atom-width: $display-width / 8;
+$header-height: 50px;
+$main-height: calc(100vh - #{$header-height} * 2);
+$main-padding: 0.875rem;
+$content-height: calc(100vh - #{$main-padding} * 2 - #{$header-height} * 2);
+
+$headerMarginTopBottom: 20px;
+
+$formWidth: 320px;
+
+$buttonLeftRightPadding: 10px;
+
+$border-radius: 5px;

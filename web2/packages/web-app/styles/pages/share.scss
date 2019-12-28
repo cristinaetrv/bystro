@@ -1,0 +1,89 @@
+@import '../variables.scss';
+
+#theme-site {
+  #share {
+    display: flex;
+
+    .right {
+      margin-left: 50px;
+    }
+
+    #left-navbar {
+      display: flex;
+      width: 16%;
+      flex-direction: column;
+      border-right: 1px solid $light-gray;
+      height: 100%;
+      min-height: 40rem;
+    }
+
+    .item-list {
+      display: flex;
+      flex-direction: column;
+
+      .card {
+        flex-direction: row;
+        display: flex;
+        align-items: center;
+        margin-bottom: $margin;
+        justify-content: space-around;
+        width: 500px;
+        border-radius: 3px;
+        padding: 20px;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, .2), 0 1px 1px 0 rgba(0, 0, 0, .14), 0 2px 1px -1px rgba(0, 0, 0, .12)
+      }
+
+      +.item-list {
+        margin-left: 50px !important;
+      }
+    }
+
+    ul {
+      list-style: none;
+    }
+
+    .ratings {
+      position: relative;
+      vertical-align: middle;
+      display: inline-block;
+      color: #b1b1b1;
+      overflow: hidden;
+    }
+
+    .full-stars {
+      position: absolute;
+      left: 0;
+      top: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      color: #fde16d;
+    }
+
+    .empty-stars:before,
+    .full-stars:before {
+      content: "\2605\2605\2605\2605\2605";
+      font-size: 14pt;
+    }
+
+    .empty-stars:before {
+      -webkit-text-stroke: 1px #848484;
+    }
+
+    .full-stars:before {
+      -webkit-text-stroke: 1px orange;
+    }
+
+    #selected-items {
+      display: flex;
+      flex: 1;
+      margin: 0px;
+      align-items: flex-start;
+      justify-content: center;
+      align-content: center;
+    }
+
+    #dropper {
+      margin: auto;
+    }
+  }
+}

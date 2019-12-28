@@ -1,0 +1,123 @@
+@import "../variables.scss";
+
+#theme-site {
+  #public-page {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    align-content: space-between;
+    min-height: $content-height;
+    justify-content: center;
+    background-color: inherit;
+
+    .right {
+      margin-left: 5px;
+    }
+
+    #left-list {
+      max-width: 420px;
+      min-width: 420px;
+      height: 100%;
+
+      margin-right: $margin * 4;
+
+      // .job-list {
+      //   font-size: .75rem;
+      // }
+    }
+
+
+    #right-list {
+      width: 640px;
+      background-color: inherit;
+
+      height: 100%;
+
+      &.active {
+        width: 100%;
+      }
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      height: $content-height;
+
+      // .job-list {
+      //   overflow-y: scroll;
+      //   /*Hack because W3C overflow spec is broken (auto on the other dimension
+      //   https://stackoverflow.com/questions/6421966/css-overflow-x-visible-and-overflow-y-hidden-causing-scrollbar-issue
+      //   */
+      //   padding: 10px 12px 10px 10px;
+      //   margin: -10px;
+      // }
+    }
+
+
+    #click-handler {
+      width: 100%;
+      position: absolute;
+      display: block;
+      top: 0;
+      left: 0;
+      height: 100%;
+    }
+
+    #control-center {
+      display: flex;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      width: 100%;
+      background: inherit;
+      z-index: 999;
+      flex-direction: column;
+      align-items: flex-start;
+      margin-bottom: 1.5rem;
+      padding: 0px;
+
+      #delete {
+        margin-right: 1rem;
+      }
+    }
+
+    &.centered {
+      margin-top: 0px;
+    }
+
+    .card {
+      width: 100%;
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+      }
+    }
+
+    #public-search {
+      width: 100%;
+      padding: 1rem;
+      border-radius: $border-radius;
+      font-size: 1rem;
+      border: 0px;
+      color: inherit;
+      border-color: inherit;
+
+      // margin-left: .75rem;
+      &:focus {
+        border-color: $blue;
+      }
+
+      &::placeholder {
+        color: inherit;
+        font-weight: 500;
+      }
+
+      &:focus {
+        &::placeholder {
+          font-weight: 300;
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,270 @@
+@import 'variables.scss';
+
+html {
+  font-size: 16px;
+}
+
+#theme-site {
+  font-family: 'Raleway', 'Helvetica', 'Arial', 'sans-serif';
+  font-weight: $weight-normal;
+  font-size: 0.875rem;
+
+  a,
+  .link-button,
+  button {
+    color: $blue;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: $weight-medium;
+
+
+    &.active,
+    &:hover {
+      color: $light-blue;
+    }
+  }
+
+  .clickable {
+    cursor: pointer;
+  }
+
+  button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  i.material-icons {
+    // line-height: 0;
+    // margin-top: .75rem;
+
+    &.rotate-180 {
+      transform: rotate(180deg);
+      margin-top: -2px;
+    }
+
+    &.rotate-90 {
+      transform: rotate(90deg);
+    }
+
+    &.highlight {
+      color: $light-blue;
+    }
+
+    &.h2 {
+      font-size: 2.875rem;
+    }
+  }
+
+
+
+  button {
+    outline: none;
+    /* border: none; */
+    /* display: inline-block; */
+    /* width: 20px; */
+    border: 1px solid $blue;
+    background-color: inherit;
+    padding: 10px;
+    border-radius: 3px;
+    line-height: 1;
+
+    &:focus,
+    &:hover {
+      border-color: $light-blue;
+    }
+
+    &:disabled {
+      color: $light-gray;
+      border-color: $light-gray;
+      cursor: default;
+
+      &:focus,
+      &:hover {
+        border-color: $light-gray;
+        color: $light-gray;
+      }
+    }
+
+    &.icon-button {
+      border-radius: 50%;
+      // height: 2.5rem;
+      padding: .4375rem;
+      border: none;
+      // width: 2.5rem;
+
+      &:hover {
+        background: $lightest-gray;
+
+        &:disabled {
+          background-color: inherit;
+        }
+      }
+
+      &:active {
+        background: $light-gray;
+      }
+    }
+
+    &.red:not(:disabled) {
+      color: $light-red;
+      border-color: $light-red;
+
+      &:hover,
+      &:focus {
+        color: $red;
+        border-color: $red;
+      }
+    }
+  }
+
+  &.dark {
+
+    a,
+    button {
+      color: inherit;
+      background-color: inherit;
+
+      &:hover {
+        color: $light-gray;
+      }
+    }
+
+    button {
+      border: 1px solid $white;
+      background-color: inherit;
+
+      &.icon-button {
+        border: none;
+
+        &:hover:not(:disabled) {
+          background-color: inherit;
+        }
+      }
+
+      &:disabled {
+        color: rgba(255, 255, 255, .25)
+      }
+
+      &:hover:not(:disabled) {
+        border-color: $light-gray;
+      }
+    }
+
+    .link-button,
+    button {
+      color: $white;
+    }
+  }
+
+  b,
+  strong {
+    font-weight: $weight-heavy;
+  }
+
+  .primary {
+    color: $light-blue
+  }
+
+  h1,
+  h2,
+  .h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: 0px;
+    font-weight: $weight-normal;
+    // line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  h1 {
+    font-weight: $weight-light;
+    font-size: 4.5rem;
+    // margin-top: -14px;
+    margin-left: -7px;
+  }
+
+  h2 {
+    font-size: 2.875rem;
+    margin-left: -3px;
+    // margin-top: -9px;
+  }
+
+  h3 {
+    font-size: 2.125rem;
+    margin-left: -1px;
+    // margin-top: -7px;
+  }
+
+  h4 {
+    font-size: 1.5rem;
+    // margin-left: -1px;
+  }
+
+  h5 {
+    font-size: 1.25rem;
+  }
+
+  h6 {
+    font-size: 1rem;
+  }
+
+  .subheader {
+    margin-top: $margin;
+    font-weight: $weight-medium;
+  }
+
+  .subtitle-1 {
+    font-size: .8125rem;
+    letter-spacing: 0.15;
+  }
+
+  .subtitle-2 {
+    font-size: $subtitle2-size;
+    font-size: $weight-medium;
+  }
+
+  .tooltip-container {
+    position: relative;
+
+    &:hover:before {
+      content: attr(data-tooltip);
+      color: inherit;
+      position: absolute;
+      z-index: 999;
+
+      width: 200px;
+      font-size: inherit;
+    }
+
+    &.tooltip-right:hover:before {
+      left: 100%;
+      text-align: left;
+      margin-left: $margin/4;
+    }
+
+    &.tooltip-left:hover:before {
+      right: 100%;
+      text-align: right;
+      margin-right: $margin/4;
+    }
+
+    &.tooltip-down:hover:before {
+      top: 100%;
+      text-align: center;
+      margin-top: $margin/4;
+    }
+
+    &:disabled:hover:before {
+      color: $light-gray;
+    }
+  }
+
+  &.dark {
+    color: $white;
+  }
+}

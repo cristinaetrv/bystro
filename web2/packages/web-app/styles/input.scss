@@ -1,0 +1,47 @@
+@import './variables.scss';
+
+#theme-site {
+  select {
+    cursor: pointer;
+    width: 48%;
+    appearance: none;
+    padding: 10px 2px;
+    background: inherit;
+    border: none;
+    border-bottom: 1px solid;
+    border-radius: 0px;
+  }
+
+  input {
+    padding: 10px 0px;
+    margin: $margin 0px;
+    border: none;
+    border-bottom: 1px solid;
+    background-color: inherit;
+    appearance: none;
+    width: 100%;
+
+    &:last-child {
+      margin-bottom: 0px;
+    }
+
+    &:first-child {
+      margin-top: 0px;
+    }
+  }
+
+  .input-container {
+
+    width: 100%;
+
+    +.input-container {
+      margin-top: $margin;
+    }
+  }
+
+  input:focus {
+    outline: none;
+    border-bottom: 1px solid $light-blue;
+    color: $light-blue;
+  }
+}
