@@ -1,4 +1,3 @@
-/*Shared with Hail*/
 import fetch from "../fetch";
 import Callbacks from "../callbacks";
 import getConfig from "next/config";
@@ -111,30 +110,29 @@ async function _preload(token?: string) {
     token = auth.token;
   }
 
-  _fetchPromise = [
-    ["completed", "completed"],
-    ["public", "all/public"]
-  ].map(async obj => {
-    try {
-      const resData = await fetch(`${url}/jobs/list/${obj[1]}`, {
-        headers: {
-          Authorization: "Bearer " + token
-        }
-      }).then(r => r.json());
+  _fetchPromise = [["completed", "completed"], ["public", "all/public"]].map(
+    async obj => {
+      try {
+        const resData = await fetch(`${url}/jobs/list/${obj[1]}`, {
+          headers: {
+            Authorization: "Bearer " + token
+          }
+        }).then(r => r.json());
 
-      data[obj[0]] = resData;
-      // for (let job of resData) {
-      //   data[job._id] = job;
-      // }
+        data[obj[0]] = resData;
+        // for (let job of resData) {
+        //   data[job._id] = job;
+        // }
 
-      console.info("all", data["all"], "adding callback for", obj[0]);
-      callbacks.call(obj[0], data[obj[0]]);
-    } catch (e) {
-      console.warn(e);
+        console.info("all", data["all"], "adding callback for", obj[0]);
+        callbacks.call(obj[0], data[obj[0]]);
+      } catch (e) {
+        console.warn(e);
+      }
+
+      _fetchPromise = null;
     }
-
-    _fetchPromise = null;
-  });
+  );
 
   return Promise.all(_fetchPromise);
 }

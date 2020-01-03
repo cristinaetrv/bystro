@@ -1,4 +1,4 @@
-/*Shared with Bystro*/
+// FIXME: Replace with lighter-weight alternative
 import io from "socket.io-client";
 import {
   initIdTokenHandler,

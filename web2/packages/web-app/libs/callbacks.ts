@@ -2,13 +2,17 @@ export default class Callbacks {
   private _callbacks: { [type: string]: ((data: any) => void)[] };
   private _callbackTimeouts: { [type: string]: NodeJS.Timeout } = {};
 
-  constructor(callbacks: { [type: string]: ((data: any) => void)[] }) {
+  constructor(callbacks: { [type: string]: ((data?: any) => void)[] }) {
     this._callbacks = callbacks;
   }
 
-  add = (type: string, action: (data: any) => void) => {
+  add = (type: string, action: (data?: any) => void) => {
+    console.info('added');
+    if (!this._callbacks[type]) {
+      this._callbacks[type] = [];
+    }
+
     this._callbacks[type].push(action);
-    console.info("adding");
     return this._callbacks[type].length;
   };
 
@@ -16,8 +20,6 @@ export default class Callbacks {
     if (this._callbacks[type].length === 0) {
       return;
     }
-
-    console.info("removing", type);
 
     // Shift appears to be faster than splice
     if (elem == 1) {
@@ -29,7 +31,7 @@ export default class Callbacks {
     }
   };
 
-  call = (type: string, data: any) => {
+  call = (type: string, data?: any) => {
     if (this._callbacks[type].length === 0) {
       return;
     }
@@ -38,6 +40,8 @@ export default class Callbacks {
       clearTimeout(this._callbackTimeouts[type]);
       delete this._callbackTimeouts[type];
     }
+
+    console.info("called", type);
 
     this._callbackTimeouts[type] = setTimeout(() => {
       this._callbacks[type].forEach(v => v(data));

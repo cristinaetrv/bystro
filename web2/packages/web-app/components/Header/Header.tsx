@@ -1,19 +1,13 @@
 import { PureComponent, Fragment } from "react";
 import Link from "next/link";
-// import {
-//   logout,
-//   addListener,
-//   removeListener,
-//   // isAuthenticated
-// } from '../libs/auth0-auth';
 import {
   initIdTokenHandler,
   addCallback,
   removeCallback,
   loggedInEventName,
   loggedOutEventName
-} from "../libs/auth";
-import "./Header/header.scss";
+} from "../../libs/auth";
+import "./header.scss";
 import Router, { withRouter } from "next/router";
 import { WithRouterProps } from "next/dist/client/with-router";
 

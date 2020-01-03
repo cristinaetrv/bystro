@@ -1,6 +1,6 @@
 import App from "next/app";
-import Header from "../components/Header";
-import { initialize, isAuthenticated, initStateSSR } from "../libs/auth0-auth";
+import Header from "../components/Header/Header";
+// import { initialize, isAuthenticated, initStateSSR } from "../libs/auth0-auth";
 import { initIdTokenHandler } from "../libs/auth";
 import Router from "next/router";
 import jscookies from "js-cookie";
@@ -9,9 +9,7 @@ import "normalize.css";
 import "styles/main.scss";
 
 import { init as initJobTracker } from "../libs/jobTracker/jobTracker";
-import { ThemeProvider } from "@material-ui/styles";
 import { listen as socketIOlisten } from "../libs/socketio";
-import theme from "../libs/theme";
 
 // import CssBaseline from '@material-ui/core/CssBaseline';
 
@@ -42,10 +40,6 @@ declare type props = {
 // let authInitialized = false;
 // TODO: think about using React context to pass down auth state instead of prop
 export default class MyApp extends App<props> {
-  state = {
-    isDark: false
-  };
-
   // Constructor runs before getInitialProps
   constructor(props: any) {
     super(props);
@@ -53,14 +47,11 @@ export default class MyApp extends App<props> {
     if (!isServer) {
       // This must happen first, so that child components that use auth
       // in constructor may do so
-      initialize();
-
+      // initialize();
       // if (isAuthenticated() && !Notebook.initialized) {
       //   startRequest().then(() => startListener());
       // }
     }
-
-    this.state.isDark = props.isDark;
   }
 
   // This runs:
@@ -69,20 +60,13 @@ export default class MyApp extends App<props> {
 
   static async getInitialProps({ Component, ctx }: props) {
     let pageProps: any = {};
-    let isDark = false;
 
     if (isServer) {
       // Run here because we have no access to ctx in constructor
-      initStateSSR(ctx.req.headers.cookie);
-
-      isDark =
-        ctx.req.headers.cookie &&
-        ctx.req.headers.cookie.indexOf("is_dark=1") > -1;
-    } else {
-      isDark = !!jscookies.get("is_dark");
+      // initStateSSR(ctx.req.headers.cookie);
     }
 
-    if (!isAuthenticated() && protectedRoute[ctx.pathname] === true) {
+    if (protectedRoute[ctx.pathname] === true) {
       // ctx only exists only on server
       if (ctx.res) {
         const cookies = new NodeCookies(ctx.req, ctx.res);
@@ -91,70 +75,39 @@ export default class MyApp extends App<props> {
         ctx.res.writeHead(303, { Location: "/login?redirect=true" });
         ctx.res.end();
 
-        return { pageProps, isDark };
+        return { pageProps };
       }
 
       jscookies.set("referrer", ctx.pathname);
       Router.replace(`/login?redirect=true`);
 
-      return { pageProps, isDark };
+      return { pageProps };
     }
 
     if (Component.getInitialProps) {
       pageProps = await Component.getInitialProps(ctx);
     }
 
-    return { pageProps, isDark };
+    return { pageProps };
   }
 
   componentDidMount() {
     initIdTokenHandler();
     initJobTracker();
     socketIOlisten();
-
-    // Remove the server-side injected CSS.
-    // const jssStyles = document.querySelector('#jss-server-side');
-    // if (jssStyles) {
-    //   jssStyles.parentNode.removeChild(jssStyles);
-    // }
   }
-
-  onDarkToggle = () => {
-    this.setState((prevState: any) => {
-      if (!prevState.isDark) {
-        jscookies.set("is_dark", "1", { path: "/" });
-
-        return { isDark: true };
-      }
-
-      jscookies.remove("is_dark", { path: "/" });
-      return { isDark: false };
-    });
-  };
 
   render() {
     const { Component, pageProps } = this.props;
 
     return (
-      <ThemeProvider theme={theme}>
-        <span id="theme-site" className={this.state.isDark ? "dark" : ""}>
-          <Header />
-          <span id="main">
-            <Component {...pageProps} />
-            {/* <ACard /> */}
-          </span>
-
-          <span id="footer">
-            <i
-              className="material-icons"
-              style={{ cursor: "pointer", fontSize: "1rem" }}
-              onClick={this.onDarkToggle}
-            >
-              wb_sunny
-            </i>
-          </span>
+      <span id="theme-site">
+        <Header />
+        <span id="main">
+          <Component {...pageProps} />
+          {/* <ACard /> */}
         </span>
-      </ThemeProvider>
+      </span>
     );
   }
 }

@@ -24,26 +24,38 @@
     "url": "https://github.com/akotlar/bystro/issues"
   },
   "homepage": "https://github.com/akotlar/bystro#readme",
+  "browser": {
+    "cookies": false
+  },
   "dependencies": {
     "@zeit/next-css": "^1.0.1",
     "@zeit/next-sass": "^1.0.1",
-    "@zeit/next-typescript": "^1.1.1",
+    "animate.css": "^3.7.2",
+    "babel-plugin-module-resolver": "^4.0.0",
+    "cookies": "^0.8.0",
     "dotenv": "^7.0.0",
-    "fork-ts-checker-webpack-plugin": "^4.0.0-beta.4",
+    "fuse.js": "^3.4.6",
     "isomorphic-unfetch": "^3.0.0",
-    "next": "^8.1.0",
+    "js-cookie": "^2.2.1",
+    "jwt-decode": "^2.2.0",
+    "next": "^9.1.6",
+    "next-purgecss": "^3.1.2",
     "node-sass": "^4.13.0",
+    "normalize.css": "^8.0.1",
     "react": "^16.12.0",
     "react-dom": "^16.12.0",
     "react-easy-state": "^6.1.1",
     "react-select": "^3.0.8",
+    "socket.io-client": "^2.3.0",
     "typescript": "^3.7.4",
+    "uuid": "^3.3.3",
     "worker-loader": "^2.0.0"
   },
   "devDependencies": {
     "@types/next": "^8.0.1",
     "@types/node": "^11.10.4",
     "@types/react": "^16.8.6",
-    "@types/react-dom": "^16.8.2"
+    "@types/react-dom": "^16.8.2",
+    "tslint": "^5.20.1"
   }
 }

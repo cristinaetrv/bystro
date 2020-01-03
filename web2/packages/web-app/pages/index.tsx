@@ -1,24 +1,20 @@
-import DefaultView from "../components/DefaultView/DefaultView";
-import "../styles/pages/index.scss";
-import jobTracker from "../libs/jobTracker";
+import React, { memo } from "react";
+import "styles/pages/index.scss";
+import DefaultView from '../components/DefaultView/DefaultView';
 
-export default () => (
-  <div id="index" className="center">
-    <h1>
+const index = memo(() => (
+  <div id="index" className="centered animated fadeIn">
+    <h1 className='animated fadeInUp faster'>
       <a href="https://github.com/akotlar/bystro" target="_blank">
         Bystro
       </a>
     </h1>
-    <div className="subtitle">Genomic analysis for any size data</div>
-    <div className="subtitle">
-      Please cite our{" "}
-      <a target="_blank" href="https://doi.org/10.1186/s13059-018-1387-3">
-        <b>Genome Biology</b>
-      </a>{" "}
-      paper!
-    </div>
-    <p>
+    <div className="subheader">Simplified genomics</div>
+
+    <div className="subheader">
       <DefaultView />
-    </p>
-  </div>
-);
+    </div>
+  </div >
+));
+
+export default index;

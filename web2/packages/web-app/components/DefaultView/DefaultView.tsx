@@ -3,10 +3,10 @@ import "./defaultView.scss";
 
 export default () => (
   <span className="default-view">
-    <Link href="/public" prefetch>
+    <Link href="/public">
       <a>Try</a>
     </Link>
-    <Link href="/help" prefetch>
+    <Link href="/">
       <a>Guide</a>
     </Link>
   </span>

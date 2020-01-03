@@ -1,4 +1,3 @@
-/*Shared with Hail*/
 // TODO: Use enums where possible
 declare type submissionSchema = {
   _id: string;

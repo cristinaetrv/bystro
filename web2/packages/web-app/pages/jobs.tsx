@@ -1,6 +1,5 @@
 import React from "react";
-import { view } from "react-easy-state";
-import jobStore, { addCallback, removeCallback } from "../libs/jobTracker";
+import jobStore, { addCallback, removeCallback } from "../libs/jobTracker/jobTracker";
 
 let _callbackId: number;
 class Jobs extends React.Component {
@@ -40,4 +39,4 @@ class Jobs extends React.Component {
   }
 }
 
-export default view(Jobs);
+export default Jobs;
