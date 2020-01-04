@@ -75,11 +75,17 @@ class Login extends PureComponent<LoginProps> {
           </div>
           <form className="content" onSubmit={this.handleSubmit}>
             <div className="input-container">
-              <input type="text" placeholder="email" ref={this.state.email} />
+              <input
+                type="text"
+                placeholder="email"
+                ref={this.state.email}
+                autoComplete="email"
+              />
             </div>
             <div className="input-container">
               <input
                 type="password"
+                autoComplete="current-password"
                 placeholder="password"
                 ref={this.state.password}
               />

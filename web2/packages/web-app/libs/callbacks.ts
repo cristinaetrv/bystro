@@ -7,7 +7,6 @@ export default class Callbacks {
   }
 
   add = (type: string, action: (data?: any) => void) => {
-    console.info('added');
     if (!this._callbacks[type]) {
       this._callbacks[type] = [];
     }
@@ -41,10 +40,8 @@ export default class Callbacks {
       delete this._callbackTimeouts[type];
     }
 
-    console.info("called", type);
-
     this._callbackTimeouts[type] = setTimeout(() => {
       this._callbacks[type].forEach(v => v(data));
-    }, 100);
+    }, 0);
   };
 }

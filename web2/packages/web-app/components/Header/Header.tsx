@@ -1,4 +1,4 @@
-import { PureComponent, Fragment } from "react";
+import { PureComponent, Fragment, memo } from "react";
 import Link from "next/link";
 import {
   initIdTokenHandler,
@@ -20,6 +20,51 @@ declare type headerState = {
   isLoggedIn: boolean;
   user?: any;
 };
+
+const UserHeader = memo(
+  (props: any) => {
+    if (props.user) {
+      return (
+        <Fragment>
+          <Link href="/user">
+            <a
+              className={`${bStyle} ${
+                props.pathname === "/user" ? "active" : ""
+              }`}
+            >
+              <b>{props.user!.name}</b>
+            </a>
+          </Link>
+          <button className={`${bStyle}`} onClick={props.onLogout}>
+            Log out
+          </button>
+        </Fragment>
+      );
+    }
+    return (
+      <Link href="/login">
+        <a
+          className={`${bStyle} ${props.pathname === "/login" ? "active" : ""}`}
+        >
+          Login
+        </a>
+      </Link>
+    );
+  },
+  (prevProps, nextProps) => {
+    if (
+      prevProps.user !== nextProps.user ||
+      prevProps.pathname === "/login" ||
+      nextProps.pathname === "/login" ||
+      prevProps.pathname === "/user" ||
+      nextProps.pathname === "/user"
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+);
 
 let _loggedInCallbackId = null;
 let _loggedOutCallbackId = null;
@@ -125,44 +170,11 @@ class Header extends PureComponent<WithRouterProps> {
         </Link> */}
 
         <span id="profile-divider" />
-        {this.state.user ? (
-          <Fragment>
-            <Link href="/user">
-              <a className={`${bStyle}`}>
-                <b>{this.state.user!.name}</b>
-              </a>
-            </Link>
-            <button className={`${bStyle}`} onClick={this.onLogout}>
-              Log out
-            </button>
-            {/* TODO: Add back in for narrow views
-              // <span id="narrow-view" style={{ marginLeft: 'auto' }}>
-              //   <span
-              //     tabIndex={0}
-              //     style={{ outline: 'none' }}
-              //     onBlur={this.onProfileLeave}
-              //   >
-              //     <a className="icon-button" onClick={this.onProfileHover}>
-              //       <i className="material-icons">face</i>
-              //     </a>
-              //     <span>
-              //       {this.state.showProfileControls && (
-              //         <span id="profile-menu">
-              //           <a onClick={this.logout}>Logout</a>
-              //         </span>
-              //       )}
-              //     </span>
-              //   </span>
-              // </span>
-            */}
-          </Fragment>
-        ) : (
-          <Link href="/login">
-            <a className={`${bStyle} ${pathname === "/login" ? "active" : ""}`}>
-              Login
-            </a>
-          </Link>
-        )}
+        <UserHeader
+          user={this.state.user}
+          onLogout={this.onLogout}
+          pathname={pathname}
+        />
       </span>
     );
   }

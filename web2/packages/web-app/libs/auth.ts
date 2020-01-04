@@ -1,10 +1,9 @@
 // TODO: Make this a library
 import jwtDecode from "jwt-decode";
-import "isomorphic-unfetch";
 import Callbacks from "./callbacks";
 
 import getConfig from "next/config";
-const url = getConfig().publicRuntimeConfig.API.BASE_URL;
+const url = getConfig().publicRuntimeConfig.API.BASE_URL || "/api";
 const refreshUrl = `${url}/user/auth/refresh`;
 
 export const loggedInEventName = "loggedIn";
@@ -61,14 +60,7 @@ class Tokens implements TokenInterface {
       this.token = token;
 
       if (this.decodedToken && !this.tokenIsExpired()) {
-        this.maintainIdToken(
-          () => {
-            callbacks.call(loggedInEventName);
-          },
-          () => {
-            this.logout();
-          }
-        );
+        this.maintainIdToken();
       } else {
         this.decodedToken = null;
         this.token = null;
@@ -95,7 +87,6 @@ class Tokens implements TokenInterface {
 
   setTokenFromJSON = async token => {
     if (!token[this.name]) {
-      console.info("error", token[this.name]);
       throw new Error(`Token JSON must contain ${this.name}`);
     }
 
@@ -104,8 +95,9 @@ class Tokens implements TokenInterface {
 
     this.decodedToken = decoded;
     this.token = token[this.name];
-    console.info("setting");
-    callbacks.call(loggedInEventName, [this.decodedToken, this.token]);
+    const data = [this.decodedToken, this.token];
+
+    callbacks.call(loggedInEventName, data);
   };
 
   clearToken() {
@@ -138,23 +130,20 @@ class Tokens implements TokenInterface {
   }
 
   async refreshIdTokenAsync() {
-    const response = await fetch(refreshUrl, {
-      method: "GET",
-      credentials: "same-origin",
+    await fetch(refreshUrl, {
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${this.token}`
       }
     }).then(res => {
       if (res.status >= 300) {
         throw new Error(res.statusText);
       }
-      console.info(res);
-      res.json();
+
+      return res.json().then(data => {
+        return this.setTokenFromJSON(data);
+      });
     });
-    console.info("setting", response);
-    await this.setTokenFromJSON(response);
-    console.info("past");
+
     return [this.decodedToken, this.token];
   }
 }

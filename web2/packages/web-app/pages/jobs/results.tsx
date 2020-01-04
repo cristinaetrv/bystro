@@ -1,4 +1,4 @@
-import React from "react";
+import { PureComponent } from "react";
 import {
   removeCallback,
   JobType,
@@ -17,7 +17,7 @@ declare type state = {
   filteredJobs: JobType[];
 };
 
-class Jobs extends React.PureComponent {
+class Jobs extends PureComponent {
   state: state = {
     jobType: null,
     jobsSelected: [-1, -1],
@@ -206,7 +206,7 @@ class Jobs extends React.PureComponent {
           <span className="job-list">
             {this.state.filteredJobs.map((job, idx) => (
               <div
-                key={idx}
+                key={job._id}
                 className={`card clickable shadow1 ${
                   idx >= this.state.jobsSelected[0] &&
                   idx <= this.state.jobsSelected[1]

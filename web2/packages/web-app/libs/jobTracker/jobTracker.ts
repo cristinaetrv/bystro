@@ -62,10 +62,8 @@ for (const key in data) {
 }
 
 const clearData = () => {
-  console.info("data", data);
   for (const key in data) {
     data[key] = [];
-    console.info("calling", key);
     callbacks.call(key, data[key]);
   }
 };
@@ -101,7 +99,6 @@ export default {
 let _fetchPromise = null;
 async function _preload(token?: string) {
   if (_fetchPromise) {
-    console.info("have");
     return Promise.all(_fetchPromise);
   }
   // async function _preload({ signal }: any = {}) {
@@ -122,11 +119,6 @@ async function _preload(token?: string) {
       }).then(r => r.json());
 
       data[obj[0]] = resData;
-      // for (let job of resData) {
-      //   data[job._id] = job;
-      // }
-
-      console.info("all", data["all"], "adding callback for", obj[0]);
       callbacks.call(obj[0], data[obj[0]]);
     } catch (e) {
       console.warn(e);
@@ -140,7 +132,6 @@ async function _preload(token?: string) {
 
 export function init() {
   addAuthCallback(loggedInEventName, data => {
-    console.info("running preload");
     _preload(data[1]);
   });
 
