@@ -43,12 +43,10 @@ class Login extends PureComponent<LoginProps> {
       body: JSON.stringify({ email, password })
     })
       .then(r => r.json())
-      .then(data => {
-        tokenHandler.setTokenFromJSON(data);
-        Router.push("/");
-      })
+      .then(data => tokenHandler.setTokenFromJSON(data))
+      .then(() => Router.push("/"))
       .catch(e => {
-        console.info(e.message);
+        console.error(e.message);
         console.info("failed to fetch", e.message);
       });
   };

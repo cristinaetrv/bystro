@@ -61,7 +61,14 @@ class Tokens implements TokenInterface {
       this.token = token;
 
       if (this.decodedToken && !this.tokenIsExpired()) {
-        this.maintainIdToken();
+        this.maintainIdToken(
+          () => {
+            callbacks.call(loggedInEventName);
+          },
+          () => {
+            this.logout();
+          }
+        );
       } else {
         this.decodedToken = null;
         this.token = null;
@@ -86,23 +93,19 @@ class Tokens implements TokenInterface {
     return new Date().getTime() / 1000 > this.decodedToken.exp;
   }
 
-  setTokenFromJSON = token => {
+  setTokenFromJSON = async token => {
     if (!token[this.name]) {
-      console.error(`Token JSON must contain ${this.name}`);
-      return;
+      console.info("error", token[this.name]);
+      throw new Error(`Token JSON must contain ${this.name}`);
     }
 
-    try {
-      window.localStorage.setItem(this.name, token[this.name]);
-      const decoded: TokenType = jwtDecode(token[this.name]);
+    window.localStorage.setItem(this.name, token[this.name]);
+    const decoded: TokenType = jwtDecode(token[this.name]);
 
-      this.decodedToken = decoded;
-      this.token = token[this.name];
-      console.info("setting");
-      callbacks.call(loggedInEventName, [this.decodedToken, this.token]);
-    } catch (e) {
-      console.error(e);
-    }
+    this.decodedToken = decoded;
+    this.token = token[this.name];
+    console.info("setting");
+    callbacks.call(loggedInEventName, [this.decodedToken, this.token]);
   };
 
   clearToken() {
@@ -113,7 +116,7 @@ class Tokens implements TokenInterface {
     this.cancelMaintainIdToken();
   }
 
-  maintainIdToken(successCb = _ => {}, failureCb = _ => {}) {
+  private maintainIdToken(successCb = _ => {}, failureCb = _ => {}) {
     this.cancelMaintainIdToken();
     this.refreshIdTokenAsync()
       .then(res => successCb(res))
@@ -135,29 +138,24 @@ class Tokens implements TokenInterface {
   }
 
   async refreshIdTokenAsync() {
-    try {
-      const response = await fetch(refreshUrl, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          [this.name]: this.token
-        })
-      }).then(j => j.json());
-
-      if (!response) {
-        throw new Error("response missing in refreshIdTokenAsync");
+    const response = await fetch(refreshUrl, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.token}`
       }
-
-      this.setTokenFromJSON(response);
-
-      return [this.decodedToken, this.token];
-    } catch (e) {
-      console.error(e);
-      return null;
-    }
+    }).then(res => {
+      if (res.status >= 300) {
+        throw new Error(res.statusText);
+      }
+      console.info(res);
+      res.json();
+    });
+    console.info("setting", response);
+    await this.setTokenFromJSON(response);
+    console.info("past");
+    return [this.decodedToken, this.token];
   }
 }
 

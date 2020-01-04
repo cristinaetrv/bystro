@@ -36,6 +36,7 @@ class UserProfile extends PureComponent {
             display: "flex",
             alignItems: "center"
           }}
+        >
           <h3>{this.state.name}</h3>
         </span>
       </div>

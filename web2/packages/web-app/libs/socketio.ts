@@ -42,7 +42,7 @@ export function addCallback(
 
 export const removeCallback = callbacks.remove;
 
-export function listen() {
+export function addAuthCallbacks() {
   addAuthCallback(loggedInEventName, () => {
     console.info("auth loggedIn event in libs/socket-io");
     _connect();
