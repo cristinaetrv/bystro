@@ -3,7 +3,7 @@ import "./defaultView.scss";
 
 export default () => (
   <span className="default-view">
-    <Link href="/public">
+    <Link href="/jobs/public">
       <a>Try</a>
     </Link>
     <Link href="/">

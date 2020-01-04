@@ -96,7 +96,7 @@ class Header extends PureComponent<WithRouterProps> {
             <b>/</b>
           </a>
         </Link>
-        <Link href="/jobs/results?type=completed" replace>
+        <Link href="/jobs/results?type=completed">
           <a
             className={`home ${bStyle} ${
               pathname === "/jobs/results" ? "active" : ""
@@ -105,7 +105,7 @@ class Header extends PureComponent<WithRouterProps> {
             Results
           </a>
         </Link>
-        <Link href="/jobs/public?type=public" replace>
+        <Link href="/jobs/public?type=public">
           <a
             className={`home ${bStyle} ${
               pathname === "/jobs/public" ? "active" : ""
@@ -114,7 +114,7 @@ class Header extends PureComponent<WithRouterProps> {
             Public
           </a>
         </Link>
-        <Link href="/share">
+        {/* <Link href="/share">
           <a
             className={`home ${bStyle} ${
               pathname.startsWith("/share") ? "active" : ""
@@ -122,7 +122,7 @@ class Header extends PureComponent<WithRouterProps> {
           >
             Share
           </a>
-        </Link>
+        </Link> */}
 
         <span id="profile-divider" />
         {this.state.user ? (

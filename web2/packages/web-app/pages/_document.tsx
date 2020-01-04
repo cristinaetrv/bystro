@@ -13,17 +13,12 @@ class MyDocument extends Document {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <link
             rel="stylesheet"
-            href="https://fonts.googleapis.com/css?family=Open+Sans:100,300,400,500"
-          />
-          <link
-            rel="stylesheet"
-            href="https://fonts.googleapis.com/css?family=Raleway:300,400,500"
+            href="https://fonts.googleapis.com/css?family=Raleway"
           />
           <link
             rel="stylesheet"
             href="https://fonts.googleapis.com/icon?family=Material+Icons"
           />
-          <script src="https://kit.fontawesome.com/1907ff3d9c.js"></script>
         </Head>
         <body style={{ margin: 0 }}>
           <Main />

@@ -3,6 +3,7 @@ require('dotenv').config();
 const withPurgeCss = require('next-purgecss');
 const withCss = require('@zeit/next-css');
 const withSass = require('@zeit/next-sass');
+const withNextSize = require('next-size');
 
 function disableCacheDirectory(config) {
   config.module.rules
@@ -17,27 +18,6 @@ const publicRuntimeConfig = {
   API: {
     BASE_URL: process.env.API_BASE_URL
   },
-  AUTH0: {
-    DOMAIN: process.env.AUTH0_DOMAIN,
-    SCOPE: process.env.AUTH0_SCOPE,
-    CALLBACK_SUFFIX: process.env.AUTH0_CALLBACK_SUFFIX,
-    RESPONSE_TYPE: process.env.AUTH0_RESPONSE_TYPE,
-    CLIENT_ID: process.env.AUTH0_CLIENT_ID,
-    AUDIENCE: process.env.AUTH0_AUDIENCE
-  },
-  HAIL: {
-    DOMAIN: process.env.HAIL_DOMAIN
-  },
-  SCORECARD: {
-    WEB_URL: process.env.SCORECARD_WEB_URL,
-    SERVER_URL: process.env.SCORECARD_SERVER_URL || process.env.SCORECARD_WEB_URL,
-    USERS: process.env.SCORECARD_USERS ?
-      process.env.SCORECARD_USERS.split(',') : []
-  },
-  NOTEBOOK: {
-    URL: process.env.NOTEBOOK_URL,
-    IMAGE: process.env.NOTEBOOK_IMAGE
-  }
 };
 
 const nextConfig = {
@@ -67,4 +47,4 @@ const nextConfig = {
   publicRuntimeConfig
 };
 
-module.exports = withSass(withCss(withPurgeCss(nextConfig)));
+module.exports = withNextSize(withSass(withCss(withPurgeCss(nextConfig))));

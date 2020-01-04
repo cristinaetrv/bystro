@@ -1,5 +1,4 @@
 import { PureComponent } from "react";
-// import auth from '../libs/auth0-auth';
 import { initIdTokenHandler } from "../libs/auth";
 
 import "styles/pages/user.scss";
@@ -37,13 +36,6 @@ class UserProfile extends PureComponent {
             display: "flex",
             alignItems: "center"
           }}
-        >
-          {/* <img
-            src='#'
-            width="50"
-            height="50"
-            style={{ marginRight: 14 }}
-          /> */}
           <h3>{this.state.name}</h3>
         </span>
       </div>

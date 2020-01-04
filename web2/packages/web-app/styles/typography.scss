@@ -15,7 +15,7 @@ html {
     color: $blue;
     cursor: pointer;
     text-decoration: none;
-    font-weight: $weight-medium;
+    font-weight: $weight-normal;
 
 
     &.active,
@@ -182,7 +182,7 @@ html {
   }
 
   h1 {
-    font-weight: $weight-light;
+    font-weight: $weight-normal;
     font-size: 4.5rem;
     // margin-top: -14px;
     margin-left: -7px;
@@ -215,7 +215,7 @@ html {
 
   .subheader {
     margin-top: $margin;
-    font-weight: $weight-medium;
+    font-weight: $weight-normal;
   }
 
   .subtitle-1 {
@@ -225,7 +225,7 @@ html {
 
   .subtitle-2 {
     font-size: $subtitle2-size;
-    font-size: $weight-medium;
+    font-size: $weight-normal;
   }
 
   .tooltip-container {

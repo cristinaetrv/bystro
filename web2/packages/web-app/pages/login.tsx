@@ -1,5 +1,4 @@
 import { PureComponent, createRef } from "react";
-// import { login } from '../libs/auth';
 import "../styles/pages/login.scss";
 import "../styles/card.scss";
 import "isomorphic-unfetch";
@@ -45,9 +44,7 @@ class Login extends PureComponent<LoginProps> {
     })
       .then(r => r.json())
       .then(data => {
-        console.info("data", data);
         tokenHandler.setTokenFromJSON(data);
-        console.info("token is", tokenHandler.token);
         Router.push("/");
       })
       .catch(e => {

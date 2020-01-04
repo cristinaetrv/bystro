@@ -58,38 +58,38 @@ export default class MyApp extends App<props> {
   // 1) SSR Mode: One time
   // 2) Client mode: After constructor (on client-side route transitions)
 
-  static async getInitialProps({ Component, ctx }: props) {
-    let pageProps: any = {};
+  // static async getInitialProps({ Component, ctx }: props) {
+  //   let pageProps: any = {};
 
-    if (isServer) {
-      // Run here because we have no access to ctx in constructor
-      // initStateSSR(ctx.req.headers.cookie);
-    }
+  //   if (isServer) {
+  //     // Run here because we have no access to ctx in constructor
+  //     // initStateSSR(ctx.req.headers.cookie);
+  //   }
 
-    if (protectedRoute[ctx.pathname] === true) {
-      // ctx only exists only on server
-      if (ctx.res) {
-        const cookies = new NodeCookies(ctx.req, ctx.res);
-        cookies.set("referrer", ctx.pathname);
+  //   if (protectedRoute[ctx.pathname] === true) {
+  //     // ctx only exists only on server
+  //     if (ctx.res) {
+  //       const cookies = new NodeCookies(ctx.req, ctx.res);
+  //       cookies.set("referrer", ctx.pathname);
 
-        ctx.res.writeHead(303, { Location: "/login?redirect=true" });
-        ctx.res.end();
+  //       ctx.res.writeHead(303, { Location: "/login?redirect=true" });
+  //       ctx.res.end();
 
-        return { pageProps };
-      }
+  //       return { pageProps };
+  //     }
 
-      jscookies.set("referrer", ctx.pathname);
-      Router.replace(`/login?redirect=true`);
+  //     jscookies.set("referrer", ctx.pathname);
+  //     Router.replace(`/login?redirect=true`);
 
-      return { pageProps };
-    }
+  //     return { pageProps };
+  //   }
 
-    if (Component.getInitialProps) {
-      pageProps = await Component.getInitialProps(ctx);
-    }
+  //   if (Component.getInitialProps) {
+  //     pageProps = await Component.getInitialProps(ctx);
+  //   }
 
-    return { pageProps };
-  }
+  //   return { pageProps };
+  // }
 
   componentDidMount() {
     initIdTokenHandler();
