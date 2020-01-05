@@ -40,8 +40,13 @@ export default class Callbacks {
       delete this._callbackTimeouts[type];
     }
 
-    this._callbackTimeouts[type] = setTimeout(() => {
-      this._callbacks[type].forEach(v => v(data));
-    }, 0);
+    this._callbackTimeouts[type] = setTimeout(
+      callbacks =>
+        callbacks.forEach(fn =>
+          setTimeout((fn, data) => fn(data), 0, fn, data)
+        ),
+      16,
+      this._callbacks[type]
+    );
   };
 }

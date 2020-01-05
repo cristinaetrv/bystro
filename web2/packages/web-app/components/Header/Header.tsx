@@ -1,5 +1,7 @@
 import { PureComponent, Fragment, memo } from "react";
 import Link from "next/link";
+import HLink from "./Link";
+
 import {
   initIdTokenHandler,
   addCallback,
@@ -10,8 +12,6 @@ import {
 import "./header.scss";
 import Router, { withRouter } from "next/router";
 import { WithRouterProps } from "next/dist/client/with-router";
-
-const bStyle = "link-button";
 
 // let listenerID: number;
 
@@ -27,25 +27,17 @@ const UserHeader = memo(
       return (
         <Fragment>
           <Link href="/user">
-            <a
-              className={`${bStyle} ${
-                props.pathname === "/user" ? "active" : ""
-              }`}
-            >
+            <a className={`${props.pathname === "/user" ? "active" : ""}`}>
               <b>{props.user!.name}</b>
             </a>
           </Link>
-          <button className={`${bStyle}`} onClick={props.onLogout}>
-            Log out
-          </button>
+          <button onClick={props.onLogout}>Log out</button>
         </Fragment>
       );
     }
     return (
       <Link href="/login">
-        <a
-          className={`${bStyle} ${props.pathname === "/login" ? "active" : ""}`}
-        >
+        <a className={`${props.pathname === "/login" ? "active" : ""}`}>
           Login
         </a>
       </Link>
@@ -54,6 +46,7 @@ const UserHeader = memo(
   (prevProps, nextProps) => {
     if (
       prevProps.user !== nextProps.user ||
+      prevProps.pathname !== nextProps.pathname ||
       prevProps.pathname === "/login" ||
       nextProps.pathname === "/login" ||
       prevProps.pathname === "/user" ||
@@ -136,29 +129,19 @@ class Header extends PureComponent<WithRouterProps> {
 
     return (
       <span id="header">
-        <Link href="/">
-          <a className={`home ${bStyle} ${pathname === "/" ? "active" : ""}`}>
-            <b>/</b>
-          </a>
-        </Link>
-        <Link href="/jobs/results?type=completed">
-          <a
-            className={`home ${bStyle} ${
-              pathname === "/jobs/results" ? "active" : ""
-            }`}
-          >
-            Results
-          </a>
-        </Link>
-        <Link href="/jobs/public?type=public">
-          <a
-            className={`home ${bStyle} ${
-              pathname === "/jobs/public" ? "active" : ""
-            }`}
-          >
-            Public
-          </a>
-        </Link>
+        <HLink href="/" title="/" pathname={pathname} active="/" />
+        <HLink
+          href="/jobs/results?type=completed"
+          title="Results"
+          pathname={pathname}
+          active="/jobs/results"
+        />
+        <HLink
+          href="/jobs/public?type=public"
+          title="Public"
+          pathname={pathname}
+          active="/jobs/public"
+        />
         {/* <Link href="/share">
           <a
             className={`home ${bStyle} ${

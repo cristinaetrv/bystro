@@ -23,10 +23,6 @@ class UserProfile extends PureComponent {
     });
   };
 
-  shouldComponentUpdate(_: any, state: any) {
-    return this.state.name !== state.name;
-  }
-
   render() {
     return (
       <div id="user" className="centered">

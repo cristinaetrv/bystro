@@ -50,12 +50,14 @@ class Jobs extends PureComponent {
 
   componentDidMount() {
     const type = (this.props as any).type;
+    this._callbackId = addCallback(type, (jobs: JobType[]) => {
+      if (this.state.jobs != jobs) {
+        this.setState(() => ({
+          jobs,
+          filteredJobs: jobs
+        }));
 
-    this._callbackId = addCallback(type, (data: JobType[]) => {
-      if (this.state.jobs != data) {
-        this.setState(() => ({ jobs: data, filteredJobs: data }));
-
-        this.fuse = new Fuse(data, {
+        this.fuse = new Fuse(jobs, {
           shouldSort: true,
           threshold: 0,
           location: 0,

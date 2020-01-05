@@ -8,15 +8,7 @@ import {
   loggedOutEventName
 } from "../auth";
 
-// const controller = new AbortController();
-// const signal = controller.signal;
-
 const url = getConfig().publicRuntimeConfig.API.BASE_URL;
-
-// enum types {
-//   "all" = "all",
-//   "public" = "public"
-// }
 
 export type JobType = {
   name: string;
