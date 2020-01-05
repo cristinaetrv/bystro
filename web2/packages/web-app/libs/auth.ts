@@ -136,6 +136,9 @@ class Tokens implements TokenInterface {
       }
     }).then(res => {
       if (res.status >= 300) {
+        if (res.status === 401) {
+          this.logout();
+        }
         throw new Error(res.statusText);
       }
 
