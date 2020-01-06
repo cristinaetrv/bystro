@@ -169,6 +169,7 @@ export function getTokenHandler(name: string): Tokens {
 
 export function initIdTokenHandler() {
   if (typeof window === "undefined") {
+    console.info("server side");
     return null;
   }
 

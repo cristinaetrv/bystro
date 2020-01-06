@@ -8,7 +8,8 @@ import "styles/card.scss";
 import "styles/pages/public.scss";
 import "styles/pages/results.scss";
 import Fuse from "fuse.js";
-
+import Router from "next/router";
+import Link from "next/link";
 declare type state = {
   jobsSelected: [number, number];
   jobType: string;
@@ -87,47 +88,37 @@ class Jobs extends PureComponent {
     idx: number
   ) => {
     e.preventDefault();
-    // e.stopPropagation();
-    // e.nativeEvent.stopImmediatePropagation();
-    if (e.shiftKey) {
-      let [min, max] = this.state.jobsSelected;
+    e.stopPropagation();
 
-      if (idx > min) {
-        max = idx;
-        if (min == -1) {
-          min = 0;
-        }
-      } else if (idx == min) {
-        min = idx;
-        max = idx;
-      } else if (idx > min) {
-        max = idx;
-      } else if (min == -1) {
-        min = 0;
-      } else {
-        min = idx;
-      }
-
-      this.setState(() => ({
-        jobsSelected: [min, max]
-      }));
-
+    if (!e.shiftKey) {
+      // Router.push(
+      //   `/jobs/results/${this.state.filteredJobs[idx]._id}`,
+      //   (shallow = true)
+      // );
       return;
     }
 
-    this.setState((old: state) => {
-      const [old_min, old_max] = old.jobsSelected;
+    let [min, max] = this.state.jobsSelected;
 
-      if (old_min == idx && old_max == idx) {
-        return {
-          jobsSelected: [-1, -1]
-        };
+    if (idx > min) {
+      max = idx;
+      if (min == -1) {
+        min = 0;
       }
+    } else if (idx == min) {
+      min = idx;
+      max = idx;
+    } else if (idx > min) {
+      max = idx;
+    } else if (min == -1) {
+      min = 0;
+    } else {
+      min = idx;
+    }
 
-      return {
-        jobsSelected: [idx, idx]
-      };
-    });
+    this.setState(() => ({
+      jobsSelected: [min, max]
+    }));
   };
 
   filterList = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -207,40 +198,42 @@ class Jobs extends PureComponent {
                     </span> */}
           <span className="job-list">
             {this.state.filteredJobs.map((job, idx) => (
-              <div
-                key={job._id}
-                className={`card clickable shadow1 ${
-                  idx >= this.state.jobsSelected[0] &&
-                  idx <= this.state.jobsSelected[1]
-                    ? "selected"
-                    : ""
-                }`}
-                onClick={e => this.handleClick(e, idx)}
-              >
-                <h5>{job.name}</h5>
-                <div className="content">
-                  <div className="row">
-                    <span className="left">Created on:</span>
-                    <b className="right">{job.createdAt}</b>
+              <Link href={`/jobs/view?id=${job._id}`}>
+                <a
+                  key={idx}
+                  className={`card clickable shadow1 ${
+                    idx >= this.state.jobsSelected[0] &&
+                    idx <= this.state.jobsSelected[1]
+                      ? "selected"
+                      : ""
+                  }`}
+                  // onClick={e => this.handleClick(e, idx)}
+                >
+                  <h5>{job.name}</h5>
+                  <div className="content">
+                    <div className="row">
+                      <span className="left">Created on:</span>
+                      <b className="right">{job.createdAt}</b>
+                    </div>
+                    <div className="row">
+                      <span className="left">Assembly</span>
+                      <b className="right">{job.assembly}</b>
+                    </div>
+                    <div className="row">
+                      <span className="left">
+                        {job.type == "annotation" ? "Input:" : "Query:"}
+                      </span>
+                      <b className="right">
+                        {job.type == "annotation" ? (
+                          <a href={job.inputFileName}>{job.inputFileName}</a>
+                        ) : (
+                          "Some query"
+                        )}
+                      </b>
+                    </div>
                   </div>
-                  <div className="row">
-                    <span className="left">Assembly</span>
-                    <b className="right">{job.assembly}</b>
-                  </div>
-                  <div className="row">
-                    <span className="left">
-                      {job.type == "annotation" ? "Input:" : "Query:"}
-                    </span>
-                    <b className="right">
-                      {job.type == "annotation" ? (
-                        <a href={job.inputFileName}>{job.inputFileName}</a>
-                      ) : (
-                        "Some query"
-                      )}
-                    </b>
-                  </div>
-                </div>
-              </div>
+                </a>
+              </Link>
             ))}
           </span>
         </span>
