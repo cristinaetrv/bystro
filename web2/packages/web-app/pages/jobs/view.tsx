@@ -44,6 +44,28 @@ import { useRouter } from "next/router";
 // import fetch from "unfetch";
 import useSWR from "swr";
 import { initIdTokenHandler } from "../../libs/auth";
+import "../../styles/pages/view.scss";
+
+function IndexRow({ search }) {
+  if (search.activeSubmission && search.activeSubmission.state === "started") {
+    const totalProgress =
+      search.activeSubmission.log.progress +
+      search.activeSubmission.log.skipped;
+
+    if (totalProgress == 0) {
+      return search.activeSubmission.log.messages[
+        search.activeSubmission.log.messages.length - 1
+      ];
+    }
+
+    return totalProgress + " lines indexed for search";
+  }
+
+  return search.activeSubmission.log.messages[
+    search.activeSubmission.log.messages.length - 1
+  ];
+}
+
 async function fetcher(path, token) {
   if (!token) {
     return {};
@@ -58,7 +80,7 @@ async function fetcher(path, token) {
   return json;
 }
 
-function HomePage() {
+function JobView() {
   const router = useRouter();
   const auth = initIdTokenHandler();
 
@@ -73,7 +95,22 @@ function HomePage() {
 
   if (error) return <div>failed to load</div>;
   if (!data) return <div>loading...</div>;
-  return <div>Next stars: {data.stargazers_count}</div>;
+  console.info("data", data);
+  return (
+    <div id="job-view">
+      <div className="card shadow1">
+        <div id="card-menu">
+          <div className="option">Download annotation</div>
+          <div className="option">Upload to S3</div>
+        </div>
+        <div className="content">
+          <div className="row">
+            <IndexRow search={data.search} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-export default HomePage;
+export default JobView;
