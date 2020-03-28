@@ -1,8 +1,6 @@
 require('dotenv').config();
 
 const withPurgeCss = require('next-purgecss');
-const withCss = require('@zeit/next-css');
-const withSass = require('@zeit/next-sass');
 
 function disableCacheDirectory(config) {
   config.module.rules
@@ -34,4 +32,4 @@ const nextConfig = {
   publicRuntimeConfig
 };
 
-module.exports = withSass(withCss(withPurgeCss(nextConfig)));
+module.exports = withPurgeCss(nextConfig);

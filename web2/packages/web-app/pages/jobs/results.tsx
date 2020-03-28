@@ -4,12 +4,10 @@ import {
   JobType,
   addCallback
 } from "../../libs/jobTracker/jobTracker";
-import "styles/card.scss";
-import "styles/pages/public.scss";
-import "styles/pages/results.scss";
+
 import Fuse from "fuse.js";
-import Router from "next/router";
 import Link from "next/link";
+
 declare type state = {
   jobsSelected: [number, number];
   jobType: string;
@@ -188,14 +186,6 @@ class Jobs extends PureComponent {
               selected
             </div>
           </span>
-          {/* <span id='control-center'>
-                        <button id='delete' className='icon-button red' disabled={this.state.jobsSelected[0] === -1}>
-                            <i className='material-icons left'>
-                                delete_outline
-                        </i>
-                        </button>
-                        <div>{this.state.jobsSelected[0] === -1 ? 0 : (this.state.jobsSelected[1] == this.state.jobsSelected[0] ? 1 : this.state.jobsSelected[1] - this.state.jobsSelected[0] + 1)} selected</div>
-                    </span> */}
           <span className="job-list">
             {this.state.filteredJobs.map((job, idx) => (
               <Link href={`/jobs/view?id=${job._id}`}>

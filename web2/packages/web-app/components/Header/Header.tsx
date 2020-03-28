@@ -9,7 +9,7 @@ import {
   loggedInEventName,
   loggedOutEventName
 } from "../../libs/auth";
-import "./header.scss";
+
 import Router, { withRouter } from "next/router";
 import { WithRouterProps } from "next/dist/client/with-router";
 

@@ -1,7 +1,5 @@
 import React from "react";
 import { removeCallback, JobType, addCallback } from "../../libs/jobTracker/jobTracker";
-import "styles/card.scss";
-import "styles/pages/public.scss";
 import Fuse from 'fuse.js';
 
 declare type state = {

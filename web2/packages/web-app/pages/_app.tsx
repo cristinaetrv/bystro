@@ -7,7 +7,15 @@ import { addAuthCallbacks as socketIOAuthCallbacks } from "../libs/socketio";
 
 import "animate.css";
 import "normalize.css";
-import "styles/main.scss";
+import "../styles/main.scss";
+import "../styles/defaultView.scss"
+import "../styles/header.scss";
+import "../styles/pages/index.scss";
+import "../styles/card.scss";
+import "../styles/pages/public.scss";
+import "../styles/pages/results.scss";
+import "../styles/card.scss";
+import "../styles/pages/public.scss";
 
 declare type props = {
   Component: any;

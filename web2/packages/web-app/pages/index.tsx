@@ -1,5 +1,4 @@
 import React, { memo } from "react";
-import "styles/pages/index.scss";
 import DefaultView from '../components/DefaultView/DefaultView';
 
 const index = memo(() => (
