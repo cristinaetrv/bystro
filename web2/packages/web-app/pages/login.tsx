@@ -1,6 +1,5 @@
 import { PureComponent, createRef } from "react";
-import "../styles/pages/login.scss";
-import "../styles/card.scss";
+
 import "isomorphic-unfetch";
 import { initIdTokenHandler, TokenInterface } from "../libs/auth";
 import Router from "next/router";

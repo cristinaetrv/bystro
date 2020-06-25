@@ -16,6 +16,7 @@ import "../styles/pages/public.scss";
 import "../styles/pages/results.scss";
 import "../styles/card.scss";
 import "../styles/pages/public.scss";
+import "../styles/pages/login.scss";
 
 declare type props = {
   Component: any;
