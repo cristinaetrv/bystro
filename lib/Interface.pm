@@ -76,7 +76,7 @@ has verbose => (
  );
 
 has compress => (
-  is => 'ro', 
+  is => 'ro',
   isa => 'Bool',
   metaclass   => 'Getopt',
   documentation =>
@@ -94,7 +94,7 @@ has archive => (
 );
 
 has run_statistics => (
-  is => 'ro', 
+  is => 'ro',
   isa => 'Int',
   metaclass   => 'Getopt',
   documentation =>
@@ -138,8 +138,8 @@ has publisher => (
   coerce => 1,
   required => 0,
   metaclass   => 'Getopt',
-  documentation => 
-    qq{Tell Bystro how to send messages to a plugged-in interface 
+  documentation =>
+    qq{Tell Bystro how to send messages to a plugged-in interface
       (such as a web interface) }
 );
 
@@ -155,7 +155,7 @@ has ignore_unknown_chr => (
 
 sub annotate {
   my $self = shift;
-  
+
   my $args = {
     config => $self->config,
     input_file => $self->input_file,
@@ -183,13 +183,43 @@ sub annotate {
   $annotator->annotate();
 }
 
+sub annotate_bed {
+  my $self = shift;
+
+  my $args = {
+    config => $self->config,
+    input_file => $self->input_file,
+    output_file_base => $self->output_file_base,
+    debug => $self->debug,
+    wantedChr => $self->wantedChr,
+    ignore_unknown_chr => $self->ignore_unknown_chr,
+    overwrite => $self->overwrite,
+    publisher => $self->publisher,
+    compress => $self->compress,
+    archive => $self->archive,
+    run_statistics => !!$self->run_statistics,
+    delete_temp => !!$self->delete_temp,
+  };
+
+  if(defined $self->verbose) {
+    $args->{verbose} = $self->verbose;
+  }
+
+  if(defined $self->max_threads) {
+    $args->{max_threads} = $self->max_threads;
+  }
+
+  my $annotator = Seq->new_with_config($args);
+  $annotator->annotate_bed();
+}
+
 __PACKAGE__->meta->make_immutable;
 
 1;
 
 =item messanger
 
-Contains a hash reference (also accept json representation of hash) that 
+Contains a hash reference (also accept json representation of hash) that
 tells Bystro how to send data to a plugged interface.
 
 Example: {

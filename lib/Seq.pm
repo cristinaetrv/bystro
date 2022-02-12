@@ -80,6 +80,147 @@ sub BUILD {
   $self->{_tracks} = $self->tracksObj;
 }
 
+sub getGnomadTracks {
+  my $self = shift;
+
+  my @gnomadTracks;
+  for my $trackGetter (@{$self->{_tracks}->trackGetters}) {
+    if(index($trackGetter->name, 'gnomad') != -1) {
+      push @gnomadTracks, $trackGetter;
+    }
+  }
+
+  return \@gnomadTracks;
+}
+
+sub annotate_bed {
+  #Inspired by T.S Wingo: https://github.com/wingolab-org/GenPro/blob/master/bin/vcfToSnp
+  my $self = shift;
+
+  open(my $fh, '<', $self->inputFilePath);
+
+  my $outFh = $self->get_write_fh( $self->{_outPath} );
+
+  my $header = <$fh>;
+
+  $self->setLineEndings($header);
+
+  $header = "chrom\tpos\talt\tref\tname";
+  my $finalHeader  = $self->_getFinalHeader($header);
+
+  my $outputHeader = $finalHeader->getString();
+
+  say $outFh $outputHeader;
+
+  my $outputter = Seq::Output->new( { header => $finalHeader } );
+
+  my $db             = $self->{_db};
+  my $refTrackGetter = $self->{_tracks}->getRefTrackGetter();
+  my @gnomadTracks = @{ $self->getGnomadTracks() };
+
+  my %wantedChromosomes = %{ $refTrackGetter->chromosomes };
+  my $trackIndices = $finalHeader->getParentFeaturesMap();
+
+  my @trackGettersExceptReference =
+  @{ $self->{_tracks}->getTrackGettersExceptReference() };
+
+  my $refTrackIdx  = $trackIndices->{ $refTrackGetter->name };
+
+  my $total = 0;
+
+  my @indelDbData;
+  my @indelRef;
+  my $chr;
+  my $inputRef;
+  my @lines;
+  my $dataFromDbAref;
+  my $dbReference;
+  # Each line is expected to be
+  # chrom \t pos \t type \t inputRef \t alt \t hets \t homozygotes \n
+  # the chrom is always in ucsc form, chr (the golang program guarantees it)
+
+  my $err;
+  while ( my $line = <$fh> ) {
+    chomp $line;
+
+    my @fields = split "\t", $line;
+    $total++;
+
+    my $chrom = $fields[0];
+    my $start = $fields[1];
+    my $end = $fields[2];
+    my $name = $fields[3];
+
+    if ( !$wantedChromosomes{ $chrom } ) {
+      next;
+    }
+
+    for my $pos ($start .. $end - 1) {
+      $dataFromDbAref = $db->dbReadOne( $chrom, $pos, 1 );
+
+      my $ref = $refTrackGetter->get($dataFromDbAref);
+
+      if ( !defined $dataFromDbAref ) {
+        $self->_errorWithCleanup("Wrong assembly? $chrom\: $pos not found.");
+        return;
+      }
+
+      my %alts;
+      for my $track (@gnomadTracks) {
+        my $data = $dataFromDbAref->[$track->dbName];
+
+        if(!defined $data) {
+          next;
+        }
+
+        my $track_alts = $data->[$track->getFieldDbName('alt')];
+
+        if (!ref $track_alts) {
+          $alts{$track_alts} = 1;
+        } else {
+          for my $alt (@$track_alts) {
+            $alts{$alt} = 1;
+          }
+        }
+      }
+
+      if(keys %alts == 0) {
+        next;
+      }
+
+      for my $alt (keys %alts) {
+        my @row = ($chrom, $pos, $alt, 0, $name);
+
+        for my $track (@trackGettersExceptReference) {
+          $row[ $trackIndices->{ $track->name } ] //= [];
+          $track->get( $dataFromDbAref, $chrom, $ref, $alt, 0, 0,
+            $row[ $trackIndices->{ $track->name } ] );
+        }
+
+        $row[$refTrackIdx][0][0] = $ref;
+
+        push @lines, \@row;
+      }
+    }
+  }
+
+  say $outFh $outputter->makeOutputString( \@lines );
+
+  system('sync');
+
+  $err = $self->_moveFilesToOutputDir();
+
+  # If we have an error moving the output files, we should still return all data
+  # that we can
+  if ($err) {
+    $self->log( 'error', $err );
+  }
+
+  $db->cleanUp();
+
+  return ( $err || undef, $self->outputFilesInfo );
+}
+
 sub annotate {
   my $self = shift;
 
