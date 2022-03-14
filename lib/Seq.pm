@@ -344,11 +344,6 @@ sub annotateTSV {
       my @fields = split '\t', $line;
       my $variant_type = $fields[7];
 
-      if ($variant_type eq "INS" && $fields[3] eq "-") {
-        say STDERR "Inferring Reference for $fields[0]:$fields[1] alt:$fields[4]";
-        $fields[3] = $refTrackGetter->get($dataFromDbAref);
-      }
-
       $total++;
 
       if ( !$wantedChromosomes{ $fields[0] } ) {
@@ -356,6 +351,11 @@ sub annotateTSV {
       }
 
       $dataFromDbAref = $db->dbReadOne( $fields[0], $fields[1] - 1, 1 );
+
+      if ($variant_type eq "INS" && $fields[3] eq "-") {
+        $fields[3] = $refTrackGetter->get($dataFromDbAref);
+        $was_discordant = 1;
+      }
 
       if ( !defined $dataFromDbAref ) {
         $self->_errorWithCleanup("Wrong assembly? $fields[0]\: $fields[1] not found.");
@@ -432,6 +432,7 @@ sub annotateTSV {
 
       # 3 holds the input reference, we'll replace this with the discordant status
       $fields[3] = $refTrackGetter->get($dataFromDbAref) ne $fields[3] ? 1 : 0;
+
       push @lines, \@fields;
     }
 
