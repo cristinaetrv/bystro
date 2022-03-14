@@ -183,6 +183,36 @@ sub annotate {
   $annotator->annotate();
 }
 
+sub annotate_tcga {
+  my $self = shift;
+
+  my $args = {
+    config => $self->config,
+    input_file => $self->input_file,
+    output_file_base => $self->output_file_base,
+    debug => $self->debug,
+    wantedChr => $self->wantedChr,
+    ignore_unknown_chr => $self->ignore_unknown_chr,
+    overwrite => $self->overwrite,
+    publisher => $self->publisher,
+    compress => $self->compress,
+    archive => $self->archive,
+    run_statistics => !!$self->run_statistics,
+    delete_temp => !!$self->delete_temp,
+  };
+
+  if(defined $self->verbose) {
+    $args->{verbose} = $self->verbose;
+  }
+
+  if(defined $self->max_threads) {
+    $args->{max_threads} = $self->max_threads;
+  }
+
+  my $annotator = Seq->new_with_config($args);
+  $annotator->annotateTSV();
+}
+
 sub annotate_bed {
   my $self = shift;
 

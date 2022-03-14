@@ -96,7 +96,7 @@ sub getGnomadTracks {
 sub annotate_bed {
   #Inspired by T.S Wingo: https://github.com/wingolab-org/GenPro/blob/master/bin/vcfToSnp
   my $self = shift;
-
+  say STDERR "IN";
   open(my $fh, '<', $self->inputFilePath);
 
   my $outFh = $self->get_write_fh( $self->{_outPath} );
@@ -107,8 +107,8 @@ sub annotate_bed {
 
   $header = "chrom\tpos\talt\tref\tname";
   my $finalHeader  = $self->_getFinalHeader($header);
-
   my $outputHeader = $finalHeader->getString();
+  say STDERR $outputHeader;
 
   say $outFh $outputHeader;
 
@@ -140,6 +140,7 @@ sub annotate_bed {
   # the chrom is always in ucsc form, chr (the golang program guarantees it)
 
   my $err;
+  my @simpleAlts = ("A", "C", "T", "G");
   while ( my $line = <$fh> ) {
     chomp $line;
 
@@ -159,6 +160,14 @@ sub annotate_bed {
       $dataFromDbAref = $db->dbReadOne( $chrom, $pos, 1 );
 
       my $ref = $refTrackGetter->get($dataFromDbAref);
+      my $idx = first_index { $_ eq $ref } @simpleAlts;
+
+      my $simpleAlt;
+      if ($idx == @simpleAlts - 1) {
+        $simpleAlt = $simpleAlts[0];
+      } else {
+        $simpleAlt = $simpleAlts[$idx + 1];
+      }
 
       if ( !defined $dataFromDbAref ) {
         $self->_errorWithCleanup("Wrong assembly? $chrom\: $pos not found.");
@@ -183,24 +192,22 @@ sub annotate_bed {
           }
         }
       }
-
-      if(keys %alts == 0) {
-        next;
+  
+      if(keys %alts > 0) {
+        $simpleAlt = (keys %alts)[0];
       }
 
-      for my $alt (keys %alts) {
-        my @row = ($chrom, $pos, $alt, 0, $name);
+      my @row = ($chrom, $pos + 1, $simpleAlt, 0, $name);
 
-        for my $track (@trackGettersExceptReference) {
-          $row[ $trackIndices->{ $track->name } ] //= [];
-          $track->get( $dataFromDbAref, $chrom, $ref, $alt, 0, 0,
-            $row[ $trackIndices->{ $track->name } ] );
-        }
-
-        $row[$refTrackIdx][0][0] = $ref;
-
-        push @lines, \@row;
+      for my $track (@trackGettersExceptReference) {
+        $row[ $trackIndices->{ $track->name } ] //= [];
+        $track->get( $dataFromDbAref, $chrom, $ref, $simpleAlt, 0, 0,
+          $row[ $trackIndices->{ $track->name } ] );
       }
+
+      $row[$refTrackIdx][0][0] = $ref;
+
+      push @lines, \@row;
     }
   }
 
@@ -275,6 +282,176 @@ sub annotate {
   return ( "File type isn\'t vcf or snp. Please use one of these files", undef );
 }
 
+sub annotateTSV {
+  #Inspired by T.S Wingo: https://github.com/wingolab-org/GenPro/blob/master/bin/vcfToSnp
+  my $self = shift;
+  my $type = shift;
+
+  say STDERR "IN";
+  open(my $fh, '<', $self->inputFilePath);
+
+  my $outFh = $self->get_write_fh( $self->{_outPath} );
+
+  my $header = <$fh>;
+
+  $self->setLineEndings($header);
+
+  say STDERR $header;
+  $self->setLineEndings($header);
+
+  my $finalHeader  = $self->_getFinalHeader($header);
+  my $outputHeader = $finalHeader->getString();
+
+  say $outFh $outputHeader;
+
+  # Now that header is prepared, make the outputter
+  my $outputter = Seq::Output->new( { header => $finalHeader } );
+
+  ######################## Build the fork pool #################################
+  my $abortErr;
+
+  my $db             = $self->{_db};
+  my $refTrackGetter = $self->{_tracks}->getRefTrackGetter();
+  my @trackGettersExceptReference =
+  @{ $self->{_tracks}->getTrackGettersExceptReference() };
+
+  my $trackIndices = $finalHeader->getParentFeaturesMap();
+  my $refTrackIdx  = $trackIndices->{ $refTrackGetter->name };
+
+  my %wantedChromosomes = %{ $refTrackGetter->chromosomes };
+  my $maxDel            = $self->maxDel;
+
+  
+
+    my $total = 0;
+
+    my @indelDbData;
+    my @indelRef;
+    my $chr;
+    my $inputRef;
+    my @lines;
+    my $dataFromDbAref;
+    my $dbReference;
+    # Each line is expected to be
+    # chrom \t pos \t type \t inputRef \t alt \t hets \t homozygotes \n
+    # the chrom is always in ucsc form, chr (the golang program guarantees it)
+
+    my $err;
+    while ( my $line = <$fh> ) {
+    chomp $line;
+      chomp $line;
+      # Chromosome      pos     Strand  Reference_Allele        Tumor_Seq_Allele2       End_Position    Tumor_Seq_Allele1       Variant_Type    dbSNP_RS 
+      my @fields = split '\t', $line;
+      my $variant_type = $fields[7];
+
+      if ($variant_type eq "INS" && $fields[3] eq "-") {
+        say STDERR "Inferring Reference for $fields[0]:$fields[1] alt:$fields[4]";
+        $fields[3] = $refTrackGetter->get($dataFromDbAref);
+      }
+
+      $total++;
+
+      if ( !$wantedChromosomes{ $fields[0] } ) {
+        next;
+      }
+
+      $dataFromDbAref = $db->dbReadOne( $fields[0], $fields[1] - 1, 1 );
+
+      if ( !defined $dataFromDbAref ) {
+        $self->_errorWithCleanup("Wrong assembly? $fields[0]\: $fields[1] not found.");
+        # Store a reference to the error, allowing us to exit with a useful fail message
+        MCE->gather( 0, 0, "Wrong assembly? $fields[0]\: $fields[1] not found." );
+        $_[0]->abort();
+        return;
+      }
+
+      if ( length( $fields[4] ) > 1 ) {
+        # INS or DEL
+        if ( looks_like_number( $fields[4] ) ) {
+          # We ignore -1 alleles, treat them just like SNPs
+          if ( $fields[4] < -1 ) {
+            # Grab everything from + 1 the already fetched position to the $pos + number of deleted bases - 1
+            # Note that position_1_based - (negativeDelLength + 2) == position_0_based + (delLength - 1)
+            if ( $fields[4] < $maxDel ) {
+              @indelDbData = ( $fields[1] .. $fields[1] - ( $maxDel + 2 ) );
+              # $self->log('info', "$fields[0]:$fields[1]: long deletion. Annotating up to $maxDel");
+            } else {
+              @indelDbData = ( $fields[1] .. $fields[1] - ( $fields[4] + 2 ) );
+            }
+
+            #last argument: skip commit
+            $db->dbRead( $fields[0], \@indelDbData, 1 );
+
+            #Note that the first position keeps the same $inputRef
+            #This means in the (rare) discordant multiallelic situation, the reference
+            #Will be identical between the SNP and DEL alleles
+            #faster than perl-style loop (much faster than c-style)
+            @indelRef = ( $fields[3], map { $refTrackGetter->get($_) } @indelDbData );
+
+            #Add the db data that we already have for this position
+            unshift @indelDbData, $dataFromDbAref;
+          }
+        } else {
+          #It's an insertion, we always read + 1 to the position being annotated
+          # which itself is + 1 from the db position, so we read  $out[1][0][0] to get the + 1 base
+          # Read without committing by using 1 as last argument
+          @indelDbData = ( $dataFromDbAref, $db->dbReadOne( $fields[0], $fields[1], 1 ) );
+
+          #Note that the first position keeps the same $inputRef
+          #This means in the (rare) discordant multiallelic situation, the reference
+          #Will be identical between the SNP and DEL alleles
+          @indelRef = ( $fields[3], $refTrackGetter->get( $indelDbData[1] ) );
+        }
+      }
+
+      if (@indelDbData) {
+        ############### Gather all track data (besides reference) #################
+        for my $posIdx ( 0 .. $#indelDbData ) {
+          for my $track (@trackGettersExceptReference) {
+            $fields[ $trackIndices->{ $track->name } ] //= [];
+
+            $track->get( $indelDbData[$posIdx], $fields[0], $indelRef[$posIdx],
+              $fields[4], 0, $posIdx, $fields[ $trackIndices->{ $track->name } ] );
+          }
+
+          $fields[$refTrackIdx][0][$posIdx] = $indelRef[$posIdx];
+        }
+
+        # If we have multiple indel alleles at one position, need to clear stored values
+        @indelDbData = ();
+        @indelRef    = ();
+      } else {
+        for my $track (@trackGettersExceptReference) {
+          $fields[ $trackIndices->{ $track->name } ] //= [];
+          $track->get( $dataFromDbAref, $fields[0], $fields[3], $fields[4], 0, 0,
+            $fields[ $trackIndices->{ $track->name } ] );
+        }
+
+        $fields[$refTrackIdx][0][0] = $refTrackGetter->get($dataFromDbAref);
+      }
+
+      # 3 holds the input reference, we'll replace this with the discordant status
+      $fields[3] = $refTrackGetter->get($dataFromDbAref) ne $fields[3] ? 1 : 0;
+      push @lines, \@fields;
+    }
+
+  say $outFh $outputter->makeOutputString( \@lines );
+
+  system('sync');
+
+  $err = $self->_moveFilesToOutputDir();
+
+  # If we have an error moving the output files, we should still return all data
+  # that we can
+  if ($err) {
+    $self->log( 'error', $err );
+  }
+
+  $db->cleanUp();
+
+  return ( $err || undef, $self->outputFilesInfo );
+}
+
 sub annotateFile {
   #Inspired by T.S Wingo: https://github.com/wingolab-org/GenPro/blob/master/bin/vcfToSnp
   my $self = shift;
@@ -289,6 +466,7 @@ sub annotateFile {
 
   ########################## Write the header ##################################
   my $header = <$fh>;
+  say STDERR $header;
   $self->setLineEndings($header);
 
   my $finalHeader  = $self->_getFinalHeader($header);
