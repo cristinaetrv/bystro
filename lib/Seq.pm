@@ -354,7 +354,6 @@ sub annotateTSV {
 
       if ($variant_type eq "INS" && $fields[3] eq "-") {
         $fields[3] = $refTrackGetter->get($dataFromDbAref);
-        $was_discordant = 1;
       }
 
       if ( !defined $dataFromDbAref ) {
