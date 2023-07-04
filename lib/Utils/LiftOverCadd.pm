@@ -1,5 +1,3 @@
-
-
 use 5.10.0;
 use strict;
 use warnings;
@@ -21,7 +19,7 @@ use Seq::Tracks::Build::LocalFilesPaths;
 use DDP;
 use Parallel::ForkManager;
 
-# Exports: _localFilesDir, _decodedConfig, compress, _wantedTrack, _setConfig, logPath, use_absolute_path
+# _localFilesDir, _decodedConfig, compress, _wantedTrack, _setConfig, and logPath, 
 extends 'Utils::Base';
 
 ########## Arguments accepted ##############
@@ -31,7 +29,7 @@ has liftOverPath => (is => 'ro', isa => Path, coerce => 1, default => 'liftOver'
 has liftOverChainPath => (is => 'ro', isa => AbsFile, coerce => 1, required => 1);
 
 my $localFilesHandler = Seq::Tracks::Build::LocalFilesPaths->new();
-sub go {
+sub liftOver {
   my $self = shift;
 
   my $liftOverExe = $self->liftOverPath;
@@ -71,7 +69,7 @@ sub go {
   for my $inPath (@$localFilesPathsAref) {
     $self->log('info', "Beginning to lift over $inPath");
 
-    my (undef, $isCompressed, $inFh) = $self->getReadFh($inPath, undef, 'fatal');
+    my (undef, $isCompressed, $inFh) = $self->get_read_fh($inPath);
 
     my $baseName = path($inPath)->basename;
 
@@ -105,7 +103,7 @@ sub go {
     chomp $versionLine;
     chomp $headerLine;
 
-    my $outFh = $self->getWriteFh($liftedPath);
+    my $outFh = $self->get_write_fh($liftedPath);
     say $outFh $versionLine;
     say $outFh $headerLine;
     close $outFh;
@@ -145,8 +143,10 @@ sub go {
 
   $self->_wantedTrack->{local_files} = \@finalOutPaths;
 
+  $self->_wantedTrack->{liftOverCadd_date} = $self->_dateOfRun;
+
   $self->_backupAndWriteConfig();
 }
 
 __PACKAGE__->meta->make_immutable;
-1
+1;

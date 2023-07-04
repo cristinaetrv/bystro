@@ -15,7 +15,7 @@ use Path::Tiny qw/path/;
 
 use Seq::Tracks::Build::LocalFilesPaths;
 
-# Exports: _localFilesDir, _decodedConfig, compress, _wantedTrack, _setConfig, logPath, use_absolute_path
+# # _localFilesDir, _decodedConfig, compress, _wantedTrack, _setConfig, and logPath
 extends 'Utils::Base';
 
 # ########## Arguments accepted ##############
@@ -58,7 +58,7 @@ sub go {
   # We'll update this list of files in the config file
   $self->_wantedTrack->{local_files} = [];
 
-  my $inFh = $self->getReadFh($inFilePath);
+  my $inFh = $self->get_read_fh($inFilePath);
 
   $self->log('info', "Reading $inFilePath");
 
@@ -91,7 +91,7 @@ sub go {
     return;
   }
 
-  my $outFh = $self->getWriteFh($outPath);
+  my $outFh = $self->get_write_fh($outPath);
 
   $self->log('info', "Writing to $outPath");
 
@@ -132,6 +132,8 @@ sub go {
   }
 
   $self->_wantedTrack->{local_files} = [$outPath];
+
+  $self->_wantedTrack->{caddToBed_date} = $self->_dateOfRun;
 
   $self->_backupAndWriteConfig();
 }

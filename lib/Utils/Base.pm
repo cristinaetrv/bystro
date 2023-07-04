@@ -21,8 +21,6 @@ use Time::localtime;
 # The track name that they want to use
 has name => (is => 'ro', isa => 'Str', required => 1);
 
-has use_absolute_path => (is => 'ro', isa => 'Bool', default => 0);
-
 # The YAML config file path
 has config => ( is => 'ro',isa => AbsFile, coerce => 1, required => 1, handles => {
     configPath => 'stringify'});
@@ -36,23 +34,6 @@ has logPath => ( is => 'ro', lazy => 1, default => sub {
 
   return $path->stringify();
 });
-
-# In the new API, the producer passed the index of the utility configuration
-# aka
-# utils:
-#  - name: liftOverCadd
-#    args:
-#     something: 1
-# So that here liftOverCadd is index 0
-# This allows this class to write a "completed" property aka:
-# # utils:
-#  - name: liftOverCadd
-#    args:
-#     something: 1
-#    completed: Date()
-has utilIdx => (is => 'ro', isa => 'Int');
-
-has utilName => (is => 'ro', isa => 'Str', required => 1);
 
 # Debug log level?
 has debug => (is => 'ro');
@@ -102,14 +83,14 @@ sub BUILD {
   # Must happen here, because we need to account for the case where track isn't found
   # And you cannot throw an error from within a default, and I think it is
   # More clear to throw a fatal error from the BUILD method than a builder=> method
-  my $trackIndex = first_index { $_->{name} eq $self->name } @{ $self->_decodedConfig->{tracks}{tracks} };
+  my $trackIndex = first_index { $_->{name} eq $self->name } @{ $self->_decodedConfig->{tracks} };
 
   if($trackIndex == -1) {
     $self->log('fatal', "Desired track " . $self->name . " wasn't found");
     return;
   }
 
-  $self->_setWantedTrack( $self->_decodedConfig->{tracks}{tracks}[$trackIndex] );
+  $self->_setWantedTrack( $self->_decodedConfig->{tracks}[$trackIndex] );
 
   my $dir = path($self->_localFilesDir);
 
@@ -146,22 +127,8 @@ sub BUILD {
   }
 }
 
-sub _writeCompletedDate {
-  my $self = shift;
-
-  if(defined $self->utilIdx) {
-    $self->_wantedTrack->{utils}[$self->utilIdx]{completed} = $self->_dateOfRun;
-  } else {
-    $self->_wantedTrack->{$self->utilName . '_completed'} = $self->_dateOfRun;
-  }
-
-  return;
-}
-
 sub _backupAndWriteConfig {
   my $self = shift;
-
-  $self->_writeCompletedDate();
 
   my $backPath =  $self->configPath . ".utils-bak." . $self->_dateOfRun;
 
@@ -186,8 +153,6 @@ sub _backupAndWriteConfig {
   if( system ("ln -f " . $self->_newConfigPath . " " . $self->configPath) != 0 ) {
     $self->log('fatal', "Failed to hard link " . $self->configPath . " to " . $self->_newConfigPath);
   }
-
-  $self->log('info', 'Finished ' . $self->utilName);
 }
 
 sub getDate {

@@ -31,8 +31,12 @@ with 'Seq::Role::Message';
 # Not worth complexity of Maybe[Type], default => undef,
 has dbName => ( is => 'ro', init_arg => undef, writer => '_setDbName');
 
-# TODO: Evaluate removing joinTracks in favor of utilities
-# or otherwise make them more flexible (array of them)
+# Some tracks may have a nearest property; these are stored as their own track, but
+# conceptually are a sub-track, 
+has nearestTrackName => ( is => 'ro', isa => 'Str', init_arg => undef, default => 'nearest');
+
+has nearestDbName => ( is => 'ro', isa => 'Str', init_arg => undef, writer => '_setNearestDbName');
+
 has joinTrackFeatures => (is => 'ro', isa => 'ArrayRef', init_arg => undef, writer => '_setJoinTrackFeatures');
 
 has joinTrackName => (is => 'ro', isa => 'Str', init_arg => undef, writer => '_setJoinTrackName');
@@ -58,56 +62,23 @@ has chromosomes => (
   required => 1,
 );
 
-# Memoized normalizer of chromosome names
-# Handles chromosomes with or without 'chr' prefix
-# And interconverts between MT and M, such that the requested
-# (MT or M) is returned for the other of the pair
-# Ex: for "1" we'll accept chr1 or 1, and both will map to "1"
-# Ex: for "chrM" we'll accept chrMT, MT, chrM, M, all mapping to "chrM"
-has normalizedWantedChr => (is => 'ro', isa => 'HashRef', init_arg => undef, lazy => 1, default => sub {
-  my $self = shift;
+#http://ideone.com/zfZBO2
+# Get the wanted chromosome, or a common transformation if not wanted
+# Since Bystro by default expects to use UCSC's naming convention, this may be useful
+# Chr may not be flagged as wanted, but actually be wanted for several reasons
+# 1) not prepended with 'chr'
+# 2) uses NCBI MT instead of chrM
+sub normalizedWantedChr {
+  #my ($self, $chr) = @_;
+  #    $_[0], $_[1]
 
-  # Includes the track chromosomes, with and without "chr" prefixes
-  # and if MT or M is provided, the other of MT or M
-  my %chromosomes = map { $_ => $_ } keys %{$self->chromosomes};
-
-  # Add if not already present
-  if($chromosomes{'MT'}) {
-    $chromosomes{'chrM'} //= 'MT';
-    $chromosomes{'chrMT'} //= 'MT';
-    $chromosomes{'M'} //= 'MT';
-  } elsif($chromosomes{'chrMT'}) {
-    $chromosomes{'chrM'} //= 'chrMT';
-    $chromosomes{'MT'} //= 'chrMT';
-    $chromosomes{'M'} //= 'chrMT';
-  } elsif($chromosomes{'chrM'}) {
-    $chromosomes{'MT'} //= 'chrM';
-    $chromosomes{'chrMT'} //= 'chrM';
-    $chromosomes{'M'} //= 'chrM';
-  } elsif($chromosomes{'M'}) {
-    $chromosomes{'MT'} //= 'M';
-    $chromosomes{'chrMT'} //= 'M';
-    $chromosomes{'chrM'} //= 'M';
-  }
-
-  # If provide 'chr' prefixes, map the same chromosomes without those prefixes
-  # to the 'chr'-prefix name
-  # And vice versa
-  for my $chr (keys %chromosomes) {
-    if(substr($chr, 0, 3) eq 'chr') {
-      # Add if not already present, in case user for some reason wants to
-      # have chr1 and 1 point to distinct databases.
-      my $part = substr($chr, 3);
-
-      $chromosomes{$part} //= $chr;
-    } else {
-      # Modify only if not already present
-      $chromosomes{"chr$chr"} //= $chr;
-    }
-  }
-
-  return \%chromosomes;
-});
+  #return $self->chromosomes->{$chr} ||
+  return $_[0]->chromosomes->{$_[1]} ||
+    #($chr eq 'chrMT' ? $self->chromosomes->{'chrM'} : undef) ||
+    ($_[1] eq 'chrMT' ? $_[0]->chromosomes->{'chrM'} : undef) ||
+    #(index($chr, 'chr') == -1 ? ($chr eq 'MT' ? $self->chromosomes->{'chrM'} : $self->chromosomes->{'chr' . $chr}) : undef);
+    (index($_[1], 'chr') == -1 ? ($_[1] eq 'MT' ? $_[0]->chromosomes->{'chrM'} : $_[0]->chromosomes->{'chr' . $_[1]}) : undef);
+}
 
 has fieldNames => (is => 'ro', init_arg => undef, default => sub {
   my $self = shift;
@@ -130,7 +101,8 @@ has features => (
   lazy => 1,
   traits   => ['Array'],
   default  => sub{ [] },
-  handles  => {
+  handles  => { 
+    allFeatureNames => 'elements',
     noFeatures  => 'is_empty',
   },
 );
@@ -148,6 +120,26 @@ has featureDataTypes => (
   },
 );
 
+has fieldMap => (is => 'ro', isa => 'HashRef', lazy => 1, default => sub{ {} });
+# We allow a "nearest" property to be defined for any tracks
+# Although it won't make sense for some (like reference)
+# It's up to the consuming class to decide if they need it
+# It is a property that, when set, may have 0 or more features
+# Cannot use predicate with this, because it ALWAYS has a default non-empty value
+# As required by the 'Array' trait
+has nearest => (
+  is => 'ro',
+  isa => 'ArrayRef',
+  # Cannot use traits with Maybe
+  traits => ['Array'],
+  handles => {
+    noNearestFeatures => 'is_empty',
+    allNearestFeatureNames => 'elements',
+  },
+  lazy => 1,
+  default => sub{ [] },
+);
+
 has join => (is => 'ro', isa => 'Maybe[HashRef]', predicate => 'hasJoin', lazy => 1, default => undef);
 
 has debug => ( is => 'ro', isa => 'Bool', lazy => 1, default => 0 );
@@ -156,15 +148,29 @@ has debug => ( is => 'ro', isa => 'Bool', lazy => 1, default => 0 );
 #### Initialize / make dbnames for features and tracks before forking occurs ###
 sub BUILD {
   my $self = shift;
+
+  # say "index is";
+  # p $self->index;
   # getFieldDbNames is not a pure function; sideEffect of setting auto-generated dbNames in the
   # database the first time (ever) that it is run for a track
   # We could change this effect; for now, initialize here so that each thread
   # gets the same name
-  for my $featureName (@{$self->features}) {
+  for my $featureName ($self->allFeatureNames) {
     $self->getFieldDbName($featureName);
   }
 
   my $trackNameMapper = Seq::Tracks::Base::MapTrackNames->new();
+  #Set the nearest track names first, because they may be applied genome wide
+  #And if we use array format to store data (to save space) good to have
+  #Genome-wide tracks have lower indexes, so that higher indexes can be used for 
+  #sparser items, because we cannot store a sparse array, must store 1 byte per field
+  if(!$self->noNearestFeatures) {
+    my $nearestFullQualifiedTrackName = $self->name . '.' . $self->nearestTrackName;
+
+    $self->_setNearestDbName( $trackNameMapper->getOrMakeDbName($nearestFullQualifiedTrackName) );
+
+    $self->log('debug', "Track " . $self->name . ' nearest dbName is ' . $self->nearestDbName);
+  }
 
   $self->_setDbName( $trackNameMapper->getOrMakeDbName($self->name) );
 
@@ -198,11 +204,12 @@ sub BUILD {
 ############ Argument configuration to meet YAML config spec ###################
 
 # Expects a hash, will crash and burn if it doesn't
-around BUILDARGS => sub {
-  my ($orig, $class, $data) = @_;
+sub BUILDARGS {
+  my ($class, $data) = @_;
 
   # #don't mutate the input data
   # my %data = %$dataHref;
+
   if(defined $data->{chromosomes} &&  ref $data->{chromosomes} eq 'ARRAY') {
     my %chromosomes = map { $_ => $_ } @{$data->{chromosomes} };
     $data->{chromosomes} = \%chromosomes;
@@ -224,7 +231,7 @@ around BUILDARGS => sub {
   }
 
   if(! defined $data->{features} ) {
-    return $class->$orig($data);
+    return $data;
   }
 
   if( defined $data->{features} && ref $data->{features} ne 'ARRAY') {
@@ -234,10 +241,18 @@ around BUILDARGS => sub {
 
   # If features are passed to as hashes (to accomodate their data type) get back to array
   my @featureLabels;
-  my %seenFeatures;
+
+  # The user can rename any input field, this will be used for the feature name
+  # This makes it possible to store any name in the db, output file, in place
+  # of the field name in the source file used to make the db
+  my $fieldMap = $data->{fieldMap} || {};
+
   for my $origFeature (@{$data->{features} } ) {
     if (ref $origFeature eq 'HASH') {
       my ($name, $type) = %$origFeature; #Thomas Wingo method
+
+      # Transform the feature name if needed
+      $name = $fieldMap->{$name} || $name;
 
       push @featureLabels, $name;
       $data->{featureDataTypes}{$name} = $type;
@@ -245,24 +260,31 @@ around BUILDARGS => sub {
       next;
     }
 
-    push @featureLabels, $origFeature;
-  }
+    my $name = $fieldMap->{$origFeature} || $origFeature;
 
-  my $idx = 0;
-  for my $feat (@featureLabels) {
-    if($seenFeatures{$feat}) {
-      $class->log('warn', "$feat is listed twice under " . $data->{name} . " features, removing");
-      splice(@featureLabels, $idx, 1);
-    }
-
-    $seenFeatures{$feat} = 1;
-
-    $idx++;
+    push @featureLabels, $name;
   }
 
   $data->{features} = \@featureLabels;
 
-  return $class->$orig($data);
+  # Currently requires features. Could allow for tracks w/o features in future
+  if( defined $data->{nearest} ) {
+    if( ref $data->{nearest} ne 'ARRAY' || !@{ $data->{nearest} } ) {
+      $class->log('fatal', 'Cannot set "nearest" property without providing 
+       an array of feature names');
+    }
+
+    for my $nearestFeatureName ( @{$data->{nearest}} ) {
+      #~ takes a -1 and makes it a 0
+      if(!defined( first{$_ eq $nearestFeatureName} @{$data->{features}} )) {
+        $class->log('fatal', "$nearestFeatureName, which you've defined under 
+          the nearest property, doesn't exist in the list of $data->{name} 'feature' 
+          properties");
+      }
+    }
+  }
+
+  return $data;
 };
 
 __PACKAGE__->meta->make_immutable;

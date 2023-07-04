@@ -6,12 +6,11 @@ package Utils::Fetch;
 
 our $VERSION = '0.001';
 
-# ABSTRACT: Fetch anything specified by remoteDir . / . remoteFiles
-# or an sql statement
+# ABSTRACT: Fetch anything specified by remote_dir + remote_files 
+# or sql_statement
 
 use Mouse 2;
 
-# Exports: _localFilesDir, _decodedConfig, compress, _wantedTrack, _setConfig, logPath, use_absolute_path
 extends 'Utils::Base';
 
 use namespace::autoclean;
@@ -23,14 +22,10 @@ use Utils::SqlWriter;
 
 use DDP;
 
-# The sql connection config
-has sql => (is => 'ro', isa => 'Maybe[Str]');
-has remoteFiles => (is => 'ro', isa => 'Maybe[ArrayRef]');
-has remoteDir => (is => 'ro', isa => 'Maybe[Str]');
-
-has connection => (is => 'ro', isa => 'Maybe[HashRef]');
-
-# Choose whether to use wget or rsync program to fetch
+# wget, ftp, whatever
+# has fetch_program => (is => 'ro', writer => '_setFetchProgram');
+# has fetch_program_arguments => (is => 'ro', writer => '_setFetchProgramArguments');
+# has fetch_command => (is => 'ro');
 has aws => (is => 'ro', init_arg => undef, writer => '_setAws');
 has wget => (is => 'ro', init_arg => undef, writer => '_setWget');
 has rsync => (is => 'ro', init_arg => undef, writer => '_setRsync');
@@ -38,53 +33,49 @@ has rsync => (is => 'ro', init_arg => undef, writer => '_setRsync');
 sub BUILD {
   my $self = shift;
 
-  if(defined $self->sql) {
+  if($self->_wantedTrack->{sql_statement}) {
     return;
   }
 
-  my $aws = which('aws');
-  my $wget = which('wget');
-  my $rsync = which('rsync');
-
-  if(!$rsync || !$wget) {
-    $self->log('fatal', 'Fetch.pm requires rsync and wget when fetching remoteFiles');
+  if(!which('rsync') || !which('wget')) {
+    $self->log('fatal', 'Fetch.pm requires rsync and wget when fetching remote_files');
   }
 
-  $self->_setAws($aws);
-  $self->_setRsync($rsync);
-  $self->_setWget($wget);
+  $self->_setAws(which('aws'));
+  $self->_setRsync(which('rsync'));
+  $self->_setWget(which('wget'));
 }
 
 ########################## The only public export  ######################
-sub go {
+sub fetch {
   my $self = shift;
 
-  if(defined $self->remoteFiles || defined $self->remoteDir) {
+  if(defined $self->_wantedTrack->{remote_files} || defined $self->_wantedTrack->{remote_dir}) {
     return $self->_fetchFiles();
   }
 
-  if(defined $self->sql) {
+  if(defined $self->_wantedTrack->{sql_statement}) {
     return $self->_fetchFromUCSCsql();
   }
 
-  $self->log('fatal', "Couldn't find either remoteFiles + remoteDir,"
-    . " or an sql statement for this track " . $self->name);
+  $self->log('fatal', "Couldn't find either remote_files + remote_dir,"
+    . " or an sql_statement for this track");
 }
 
 ########################## Main methods, which do the work  ######################
-# These are called depending on whether sql_statement or remoteFiles + remoteDir given
+# These are called depending on whether sql_statement or remote_files + remote_dir given
 sub _fetchFromUCSCsql {
   my $self = shift;
-
-  my $sqlStatement = $self->sql;
+  
+  my $sqlStatement = $self->_wantedTrack->{sql_statement};
 
   # What features are called according to our YAML config spec
-  my $featuresKey = '%features%';
+  my $featuresKey = 'features';
   my $featuresIdx = index($sqlStatement, $featuresKey);
 
   if( $featuresIdx > -1 ) {
     if(! @{$self->_wantedTrack->{features}} ) {
-      $self->log('fatal', "Requires features if sql_statement speciesi SELECT %features%")
+      $self->log('fatal', "Requires features if sql_statement speciesi SELECT features")
     }
 
     my $trackFeatures;
@@ -92,7 +83,7 @@ sub _fetchFromUCSCsql {
       # YAML config spec defines optional type on feature names, so some features
       # Can be hashes. Take only the feature name, ignore type, UCSC doesn't use them
       my $featureName;
-
+      
       if(ref $_) {
         ($featureName) = %{$_};
       } else {
@@ -106,25 +97,20 @@ sub _fetchFromUCSCsql {
 
     substr($sqlStatement, $featuresIdx, length($featuresKey) ) = $trackFeatures;
   }
-
-  my $config = {
-    sql => $sqlStatement,
-    assembly => $self->_decodedConfig->{assembly},
+  
+  my $sqlWriter = Utils::SqlWriter->new({
+    sql_statement => $sqlStatement,
     chromosomes => $self->_decodedConfig->{chromosomes},
     outputDir => $self->_localFilesDir,
     compress => 1,
-  };
-
-  if(defined $self->connection) {
-    $config->{connection} = $self->connection;
-  }
-
-  my $sqlWriter = Utils::SqlWriter->new($config);
+  });
 
   # Returns the relative file names
-  my @writtenFileNames = $sqlWriter->go();
+  my @writtenFileNames = $sqlWriter->fetchAndWriteSQLData();
 
   $self->_wantedTrack->{local_files} = \@writtenFileNames;
+
+  $self->_wantedTrack->{fetch_date} = $self->_dateOfRun;
 
   $self->_backupAndWriteConfig();
 
@@ -143,13 +129,13 @@ sub _fetchFiles {
   my $isRsync = 0;
   my $isS3 = 0;
 
-  if($self->remoteDir) {
+  if($self->_wantedTrack->{remote_dir}) {
     # remove http:// (or whatever protocol)
-    $self->remoteDir =~ m/$pathRe/;
+    $self->_wantedTrack->{remote_dir} =~ m/$pathRe/;
 
     if($1) {
       $remoteProtocol = $1;
-    } elsif($self->remoteDir =~ 's3://') {
+    } elsif($self->_wantedTrack->{remote_dir} =~ 's3://') {
       $isS3 = 1;
       $remoteProtocol = 's3://';
     } else {
@@ -164,7 +150,7 @@ sub _fetchFiles {
 
   $self->_wantedTrack->{local_files} = [];
 
-  for my $file ( @{$self->remoteFiles} ) {
+  for my $file ( @{$self->_wantedTrack->{remote_files}} ) {
     my $remoteUrl;
 
     if($remoteDir) {
@@ -176,8 +162,8 @@ sub _fetchFiles {
       if($1) {
         $remoteUrl = $file;
       } elsif($file =~ 's3://') {
-        $remoteUrl = $file;
         $isS3 = 1;
+        $remoteUrl = $file;
       } else {
         $remoteUrl = "rsync://" . $2;
         $isRsync = 1;
@@ -196,8 +182,6 @@ sub _fetchFiles {
       }
       $command = $self->aws . " s3 cp $remoteUrl $outDir";
     } else {
-      # -N option will clobber only if remote file is newer than local copy
-      # -S preserves timestamp
       $command = $self->wget . " -N -S $remoteUrl -P $outDir";
     }
 
@@ -226,6 +210,8 @@ sub _fetchFiles {
     # stagger requests to be kind to the remote server
     sleep 3;
   }
+
+  $self->_wantedTrack->{fetch_date} = $self->_dateOfRun;
 
   $self->_backupAndWriteConfig();
 

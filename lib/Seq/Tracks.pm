@@ -1,32 +1,36 @@
 # ABSTRACT: A base class for track classes
 
-# Used to simplify process of detecting tracks
-# Tracks.pm knows very little about each track, just enough to instantiate them
-# This is a singleton class; it will not instantiate multiple of each track
-# Finally, it is worth noting that track order matters
-# By default, the tracks are stord in the database in the order specified in the
-# tracks object (from the YAML config)
-# Since the database stores each track's data at each position in the genome
-# in an array, and arrays can only be consequtively indexed, it is best
-# to place sparse tracks at the end of the array of tracks
-# such that undef values are not written for these sparse tracks for as many positions
-# Ex: If we place refSeq track before cadd track, at every position where cadd exists
-# and refSeq doesn't, an undef value will be written, such the cadd value can be written
-# to the appropriate place;
-# ie: [refSeq, cadd] yields [undef, caddData] at every position that cadd exists
-# but refSeq doesn't
-# However, placing refSeq after cadd maens that we can simply store [cadd] and notice
-# that there is no refSeq index
+# used to simplify process of detecting tracks
+# I think that Tracks.pm should know which features it has access to
+# and anything conforming to that interface should become an instance
+# of the appropriate class
+# and everythign else shouldn't, and should generate a warning
+# This is heavily inspired by Dr. Thomas Wingo's primer picking software design
+# expects structure to be {
+#  trackName : {typeStuff},
+#  typeName2 : {typeStuff2},
+#}
+
+#We don't instantiate a new object for each data source
+#Instead, we simply create a container for each name : type pair
+#We could use an array, but a hash is easier to reason about
+#We also expect that each record will be identified by its track name
+#so (in db) {
+#   trackName : {
+#     featureName: featureValue  
+#} 
+#}
 
 package Seq::Tracks;
 use 5.10.0;
 use strict;
 use warnings;
 use DDP;
-use Clone 'clone';
 
 use Mouse 2;
 with 'Seq::Role::Message';
+
+use Seq::Headers;
 
 use Seq::Tracks::Reference;
 use Seq::Tracks::Score;
@@ -35,16 +39,15 @@ use Seq::Tracks::Region;
 use Seq::Tracks::Gene;
 use Seq::Tracks::Cadd;
 use Seq::Tracks::Vcf;
-use Seq::Tracks::Nearest;
 
 use Seq::Tracks::Reference::Build;
 use Seq::Tracks::Score::Build;
 use Seq::Tracks::Sparse::Build;
 use Seq::Tracks::Region::Build;
 use Seq::Tracks::Gene::Build;
-use Seq::Tracks::Nearest::Build;
 use Seq::Tracks::Cadd::Build;
 use Seq::Tracks::Vcf::Build;
+
 
 use Seq::Tracks::Base::Types;
 ########################### Configuration ##################################
@@ -57,7 +60,7 @@ has gettersOnly => (is => 'ro', isa => 'Bool', default => 0);
   # typeName : {
   #  name: someName (optional),
   #  data: {
-  #   feature1:
+  #   feature1:   
 #} } }
 # This is used to check whether this package has been initialized
 has tracks => (
@@ -65,15 +68,12 @@ has tracks => (
   isa => 'ArrayRef[HashRef]'
 );
 
-has outputOrder => (
-  is => 'ro', isa => 'Maybe[ArrayRef[Str]]'
-);
 ########################### Public Methods #################################
 
 # @param <ArrayRef> trackBuilders : ordered track builders
 state $orderedTrackBuildersAref = [];
 has trackBuilders => ( is => 'ro', isa => 'ArrayRef', init_arg => undef, lazy => 1,
-  traits => ['Array'], handles => { allTrackBuilders => 'elements' },
+  traits => ['Array'], handles => { allTrackBuilders => 'elements' }, 
   default => sub { $orderedTrackBuildersAref } );
 
 state $trackBuildersByName = {};
@@ -91,7 +91,7 @@ sub getTrackBuildersByType {
 # @param <ArrayRef> trackGetters : ordered track getters
 state $orderedTrackGettersAref = [];
 has trackGetters => ( is => 'ro', isa => 'ArrayRef', init_arg => undef, lazy => 1,
-  traits => ['Array'], handles => { allTrackGetters => 'elements' } ,
+  traits => ['Array'], handles => { allTrackGetters => 'elements' } , 
   default => sub { $orderedTrackGettersAref } );
 
 state $trackGettersByName = {};
@@ -169,10 +169,9 @@ sub BUILD {
   # i.e Seq.pm passes { tracks => $someTrackConfiguration } and Seq::Tracks::Gene
   # can call  Seq::Tracks::getRefTrackGetter and receive a configured ref track getter
 
-  # However it is important that in long-running parent processes, which may
+  # However it is important that in long-running parent processes, which may 
   # instantiate this program more than once, we do not re-use old configurations
   # So every time the parent passes a tracks object, we re-configure this class
-
   if( !$self->tracks ) {
     if(!_hasTrackGetters() ) {
       $self->log('fatal', 'First time Seq::Tracks is run tracks configuration must be passed');
@@ -184,27 +183,13 @@ sub BUILD {
     return;
   }
 
-  # If we're only requesting
+  $self->_buildTrackGetters($self->tracks);
+
   if($self->gettersOnly) {
-    $self->_buildTrackGetters($self->tracks);
     return;
   }
 
-  # If both getters and builders requested, don't mutate the tracks object
-  # so that builders get their own distinct configuration
-  my $getTracks = clone($self->tracks);
-
-  # TODO: Lazy, or side-effect free initialization?
-  # Builders may have side effects; they may configure
-  # the db features available, including any private features
-  # If so, create those first
-
   $self->_buildTrackBuilders($self->tracks);
-
-  # This ordering necessarily means that Builders cannot have getters in their
-  # BUILD step / initialization
-  # Need to wait for this to run, after BUILD
-  $self->_buildTrackGetters($getTracks);
 }
 
 ################### Private builders #####################
@@ -242,75 +227,37 @@ sub _buildTrackGetters {
   # If so, remove the tracks, free the memory
   _clearStaticGetters();
 
-  my %trackOrder;
-  if(defined $self->outputOrder) {
-    my %tracks = map { $_->{name} => $_ } @$trackConfigurationAref;
-    my $i = 0;
-    for my $name (@{$self->outputOrder}) {
-      if(!defined $tracks{$name}) {
-        $self->log('fatal', "Uknown track $name specified in 'outputOrder'");
-      }
-
-      $trackOrder{$name} = $i;
-      $i++;
-    }
-
-    if($i < @$trackConfigurationAref) {
-      my @notSeen = map { exists $trackOrder{$_->{name}} ? () : $_->{name} } @$trackConfigurationAref;
-      $self->log('fatal', "When using 'outputOrder', specify all tracks, missing: " . join(',', @notSeen));
-    }
-  }
-
-  # allow us to place tracks at specific indices
-  $#$orderedTrackGettersAref = $#$trackConfigurationAref;
-
-  # Iterate over the original order
-  # This is important, because otherwise we may accidentally set the
-  # tracks database order based on the output order
-  # if _buildTrackGetters is called before _buildTrackBuilders
-  my $i = 0;
-  for my $trackHref (@$trackConfigurationAref) {
-    if($trackHref->{ref}) {
-      $trackHref->{ref} = $trackBuildersByName->{ $trackHref->{ref} };
-    }
-
-    #class
+  for my $trackHref (@$trackConfigurationAref ) {
+    #get the trackClass
+    my $trackFileName = $self->_toTrackGetterClass($trackHref->{type} );
+    #class 
     my $className = $self->_toTrackGetterClass( $trackHref->{type} );
 
     my $track = $className->new($trackHref);
 
     if(!$seenRef) {
-      $seenRef = $trackHref->{type} eq $types->refType;
-    } elsif($trackHref->{type} eq $types->refType) {
+      $seenRef = $track->{type} eq $types->refType;
+    } elsif($track->{type} eq $types->refType) {
       $self->log('fatal', "Only one reference track allowed, found at least 2");
       return;
     }
 
     if(exists $seenTrackNames{ $track->{name} } ) {
-      $self->log('fatal', "More than one track with the same name
+      $self->log('fatal', "More than one track with the same name 
         exists: $trackHref->{name}. Each track name must be unique
       . Overriding the last object for this name, with the new")
     }
 
     #we use the track name rather than the trackHref name
     #because at the moment, users are allowed to rename their tracks
-    #by name :
+    #by name : 
       #   something : someOtherName
-    $trackGettersByName->{$track->{name}} = $track;
+    $trackGettersByName->{$track->{name} } = $track;
 
     #allows us to preserve order when iterating over all track getters
-    if(%trackOrder && $track->{name}) {
-      $orderedTrackGettersAref->[$trackOrder{$track->{name}} ] = $track;
-    } else {
-      $orderedTrackGettersAref->[$i] = $track;
-    }
+    push @$orderedTrackGettersAref, $track;
 
-    $i++;
-  }
-
-  for my $track (@$orderedTrackGettersAref) {
-    $track->setHeaders();
-    push @{$trackGettersByType->{$track->type} }, $track;
+    push @{$trackGettersByType->{$trackHref->{type} } }, $track;
   }
 
   if(!$seenRef) {
@@ -335,10 +282,8 @@ sub _buildTrackBuilders {
   _clearStaticBuilders();
 
   for my $trackHref (@$trackConfigurationAref) {
-    if($trackHref->{ref}) {
-      $trackHref->{ref} = $trackBuildersByName->{ $trackHref->{ref} };
-    }
-    #class
+    my $trackFileName = $self->_toTrackBuilderClass($trackHref->{type} );
+    #class 
     my $className = $self->_toTrackBuilderClass( $trackHref->{type} );
 
     my $track = $className->new($trackHref);
@@ -352,17 +297,17 @@ sub _buildTrackBuilders {
 
     #we use the track name rather than the trackHref name
     #because at the moment, users are allowed to rename their tracks
-    #by name :
+    #by name : 
       #   something : someOtherName
     if(exists $seenTrackNames{ $track->{name} } ) {
-      $self->log('fatal', "More than one track with the same name
+      $self->log('fatal', "More than one track with the same name 
         exists: $trackHref->{name}. Each track name must be unique
       . Overriding the last object for this name, with the new")
     }
 
     #we use the track name rather than the trackHref name
     #because at the moment, users are allowed to rename their tracks
-    #by name :
+    #by name : 
       #   something : someOtherName
     #TODO: make this go away by automating track name conversion/storing in db
     $trackBuildersByName->{$track->{name} } = $track;
@@ -390,32 +335,18 @@ sub _toTrackGetterClass {
   my $self = shift,
   my $type = shift;
 
-  # TODO: this right now won't pass $self->type TrackType constraints
-  if($type =~ /\w+\:+\w+/) {
-    my @types = split /\:+/, $type;
-    my $part1 = $self->_toTitleCase($types[0]);
-    my $part2 = $self->_toTitleCase($types[1]);
+  my $classNamePart = $self->_toTitleCase($type);
 
-    return "Seq::Tracks::" . $part1 . "::" . $part2;
-  }
-
-  return "Seq::Tracks::" . $self->_toTitleCase($type);
+  return "Seq::Tracks::" . $classNamePart;
 }
 
 sub _toTrackBuilderClass{
   my $self = shift,
   my $type = shift;
 
-  # TODO: this right now won't pass $self->type TrackType constraints
-  if($type =~ /\w+\:+\w+/) {
-    my @types = split /\:+/, $type;
-    my $part1 = $self->_toTitleCase($types[0]);
-    my $part2 = $self->_toTitleCase($types[1]);
+  my $classNamePart = $self->_toTitleCase($type);
 
-    return "Seq::Tracks::" . $part1 . "::" . $part2 . "::Build";
-  }
-
-  return "Seq::Tracks::" . $self->_toTitleCase($type) . "::Build";
+  return "Seq::Tracks::" . $classNamePart ."::Build";
 }
 
 __PACKAGE__->meta->make_immutable;

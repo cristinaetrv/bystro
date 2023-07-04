@@ -32,14 +32,14 @@ GetOptions(
   'v|verbose=i'    => \$verbose,
   'h|help'       => \$help,
   'd|debug=i'      => \$debug,
-  'o|overwrite'  => \$overwrite,
+  'o|overwrite=i'  => \$overwrite,
   'chr|wantedChr=s' => \$wantedChr,
   'delete' => \$delete,
   'build_region_track_only' => \$regionTrackOnly,
   'skipCompletionCheck|skip_completion_check' => \$skipCompletionCheck,
   'dry_run_insertions|dry|dryRun' => \$dryRunInsertions,
   'log_dir=s' => \$logDir,
-  'maxThreads=i' => \$maxThreads,
+  'max_threads=i' => \$maxThreads,
   'meta_only' => \$metaOnly,
 );
 
@@ -55,14 +55,14 @@ my %options = (
   'v|verbose=i'    => \$verbose,
   'h|help'       => \$help,
   'd|debug=i'      => \$debug,
-  'o|overwrite'  => \$overwrite,
+  'o|overwrite=i'  => \$overwrite,
   'chr|wantedChr=s' => \$wantedChr,
   'delete' => \$delete,
   'build_region_track_only' => \$regionTrackOnly,
   'skipCompletionCheck|skip_completion_check' => \$skipCompletionCheck,
   'dry_run_insertions|dry|dryRun' => \$dryRunInsertions,
   'log_dir=s' => \$logDir,
-  'maxThreads=i' => \$maxThreads,
+  'max_threads=i' => \$maxThreads,
   'meta_only' => \$metaOnly,
 );
 
@@ -115,7 +115,7 @@ my $builder_options_href = {
 };
 
 if(defined $maxThreads) {
-  $builder_options_href->{maxThreads} = $maxThreads;
+  $builder_options_href->{max_threads} = $maxThreads;
 }
 # my $log_file = path(".")->child($log_name)->absolute->stringify;
 # Log::Any::Adapter->set( 'File', $log_file );

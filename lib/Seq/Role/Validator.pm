@@ -24,6 +24,8 @@ use Seq::InputFile;
 
 with 'Seq::Role::IO', 'Seq::Role::Message';
 
+has assembly => (is => 'ro', required => 1);
+
 has _inputFileBaseName => (
   isa => 'Str',
   is => 'ro',
@@ -37,21 +39,38 @@ has _inputFileBaseName => (
 );
 
 sub validateInputFile {
-  my ( $self, $inputFilePath ) = @_;
+  my ( $self, $inputFileAbsPath ) = @_;
 
-  my @parts = split("/", $inputFilePath);
-
-  my $last = $parts[-1];
-
-  # TODO: support more types
-  for my $type (("vcf", "snp")) {
-    my ($format, $gz) = $last =~ /\.($type)(\.\w+)?/;
-
-    if($format) {
-      return (0, lc($format));
-    }
+  if(!ref $inputFileAbsPath) {
+    $inputFileAbsPath = path($inputFileAbsPath);
   }
 
-  return ("Couldn't identify format of $inputFilePath", "");
+  my $fh = $self->get_read_fh($inputFileAbsPath);
+  my $firstLine = <$fh>;
+
+  my $orig = $self->getLineEndings();
+
+  my $err = $self->setLineEndings($firstLine);
+
+  if($err) {
+    return ($err, undef);
+  }
+
+  chomp $firstLine;
+
+  my $headerFieldsAref = $self->getCleanFields($firstLine);
+
+  my $inputHandler = Seq::InputFile->new();
+
+  #last argument to not die, we want to be able to convert
+  my $snpHeaderErr = $inputHandler->checkInputFileHeader($headerFieldsAref, 1);
+
+  $self->setLineEndings($orig);
+
+  if(!defined $headerFieldsAref || defined $snpHeaderErr) {
+    return (0, 'vcf');
+  }
+
+  return (0, 'snp');
 }
 1;

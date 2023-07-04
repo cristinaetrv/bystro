@@ -16,13 +16,15 @@ use Seq::Tracks;
 
 use Scalar::Util qw/looks_like_number/;
 
+my $rounder = Seq::Tracks::Score::Build::Round->new();
+
 # Cadd tracks seem to be 1 based (not well documented)
-has '+based' => (default => 1);
+has '+based' => (
+  default => 1,
+);
 
 # CADD files may not be sorted,
-has sorted => (is => 'ro', isa => 'Bool', lazy => 1, default => 0);
-
-has scalingFactor => (is => 'ro', isa => 'Int', default => 10);
+has sorted_guaranteed => (is => 'ro', isa => 'Bool', lazy => 1, default => 0);
 
 my $order = Seq::Tracks::Cadd::Order->new();
 $order = $order->order;
@@ -31,7 +33,8 @@ my $refTrack;
 sub BUILD {
   my $self = shift;
 
-  $self->{_rounder} = Seq::Tracks::Score::Build::Round->new({scalingFactor => $self->scalingFactor});
+  my $tracks = Seq::Tracks->new();
+  $refTrack = $tracks->getRefTrackGetter();
 }
 ############## Version that does not assume positions in order ################
 ############## Will optimize for cases when sorted_guranteed truthy ###########
@@ -39,44 +42,12 @@ sub BUILD {
 sub buildTrack {
   my $self = shift;
 
-  # TODO: Remove side effects, or think about another initialization method
-  # Unfortunately, it is better to call track getters here
-  # Because builders may have side effects, like updating
-  # the meta database
-  # So we want to call builders BUILD methods first
-  my $tracks = Seq::Tracks->new();
-  $refTrack = $tracks->getRefTrackGetter();
-
-  my $pm = Parallel::ForkManager->new($self->maxThreads);
-
-  ######Record completion status only if the process completed unimpeded ########
-  my %completedChrs;
-  $pm->run_on_finish( sub {
-    my ($pid, $exitCode, $fileName, $exitSignal, $coreDump, $errOrChrs) = @_;
-
-    if($exitCode != 0) {
-      my $err = $self->name . ": got exitCode $exitCode for $fileName: $exitSignal . Dump: $coreDump";
-
-      $self->log('fatal', $err);
-    }
-
-    if($errOrChrs && ref $errOrChrs eq 'HASH') {
-      for my $chr (keys %$errOrChrs) {
-        if(!$completedChrs{$chr}) {
-          $completedChrs{$chr} = [$fileName];
-        } else {
-          push @{$completedChrs{$chr}}, $fileName;
-        }
-      }
-    }
-
-    #Only message that is different, in that we don't pass the $fileName
-    $self->log('info', $self->name . ": completed building from $fileName");
-  });
+  my $pm = Parallel::ForkManager->new($self->max_threads);
 
   #Perl is dramatically faster when splitting on a constant, so we assume '\t'
   if($self->delimiter ne '\t' && $self->delimiter ne "\t") {
     $self->log("fatal", $self->name . ": requires delimiter to be \\t");
+    die $self->name . ": requires delimiter to be \\t";
   }
 
   my $missingValue = undef;
@@ -85,36 +56,36 @@ sub buildTrack {
   # value for those bases that we skip, because we'll ned mergeFunc
   # to know when data was found for a position, and when it is truly missing
   # Because when CADD scores are not sorted, each chromosome-containing file
-  # can potentially have any other chromosome's scores, meaning we may get
+  # can potentially have any other chromosome's scores, meaning we may get 
   # 6-mers or greater for a single position; when that happens the only
-  # sensible solution is to store a missing value; undef would be nice,
+  # sensible solution is to store a missing value; undef would be nice, 
   # but that will never get triggered, unless our database is configured to store
-  # hashes instead of arrays; since a sparse array will contain undef/nil
+  # hashes instead of arrays; since a sparse array will contain undef/nil 
   # for any track at that position that has not yet been inserted into the db
   # For now we require sorting to be guaranteed to simplify this code
-  if(!$self->sorted) {
-    $self->log("fatal", $self->name . ": requires sorted to be true");
+  if(!$self->sorted_guaranteed) {
+    $self->log("fatal", $self->name . ": requires sorted_guaranteed to be true");
+    die $self->name . ": requires sorted_guaranteed to be true";
   }
 
   for my $file ( @{$self->local_files} ) {
     $self->log('info', $self->name . ": beginning building from $file");
 
-    # Although this should be unnecessary, environments must be created
-    # within the process that uses them
-    # This provides a measure of safety
-    $self->db->cleanUp();
-
     $pm->start($file) and next;
-      my ($err, undef, $fh) = $self->getReadFh($file);
-
-      if($err) {
-        $self->log('fatal', $self->name . ": $err");
-      }
+      my $fh = $self->get_read_fh($file);
 
       my $versionLine = <$fh>;
 
       if(!$versionLine) {
-        $self->log('fatal', $self->name . ": couldn't read version line of $file");
+        my $err;
+        if(!close($fh) && $? != 13) {
+          $err = $self->name . ": failed to open $file due to $1 $($?)";
+        } else {
+          $err = $self->name . ": $file empty";
+        }
+
+        $self->log('fatal', $err);
+        die $err;
       }
 
       chomp $versionLine;
@@ -123,13 +94,22 @@ sub buildTrack {
 
       if( index($versionLine, '## CADD') == -1) {
         $self->log('fatal', $self->name . ": first line of $file is not CADD formatted: $_");
+        die $self->name . ": first line of $file is not CADD formatted: $_";
       }
 
       # Cadd's columns descriptor is on the 2nd line
       my $headerLine = <$fh>;
 
       if(!$headerLine) {
-        $self->log('fatal', $self->name . ": couldn't read header line of $file");
+        my $err;
+        if(!close($fh) && $? != 13) {
+          $err = $self->name . ": failed to open $file due to $1 ($?)";
+        } else {
+          $err = $self->name . ": $file empty";
+        }
+
+        $self->log('fatal', $err);
+        die $err;
       }
 
       chomp $headerLine;
@@ -186,9 +166,6 @@ sub buildTrack {
 
       my ($chr, $wantedChr, $dbPosition);
       my (@caddData, $caddRef, $dbData, $assemblyRefBase, $altAllele, $refBase, $phredScoresAref);
-
-      # Manage our own cursors, to improve performance
-      my $cursor;
       my $count = 0;
       FH_LOOP: while ( my $line = $fh->getline() ) {
         chomp $line;
@@ -199,43 +176,44 @@ sub buildTrack {
         # Else it "should" be found in the beginning of the string
         # If not, it will be caught in our if( $self->chrIsWanted($chr) ) check
         # http://ideone.com/Y5PiUa
+        if(index($fields[0], 'chr') == -1) {
+          $chr = "chr$fields[0]";
+        } else {
+          $chr = $fields[0];
+        }
 
-        # Normalizes the $chr representation to one we may want but did not specify
-        # Example: 1 becomes chr1, and is checked against our list of wanted chromosomes
-        # Avoids having to use a field transformation, since this may be very common
-        # and Bystro typical use is with UCSC-style chromosomes
-        # If the chromosome isn't wanted, $chr will be undefined
-        $chr = $self->normalizedWantedChr->{ $fields[0] };
+        if( !$wantedChr || ($wantedChr && $wantedChr ne $chr) ) {
+          if( defined $wantedChr && (@caddData || defined $caddRef) ) {
+            my $err = $self->name . ": changed chromosomes, but unwritten data remained";
 
-        #If the chromosome is new, write any data we have & see if we want new one
-        if(!defined $wantedChr || (!defined $chr || $wantedChr ne $chr)) {
-          # We switched chromosomes
-          if(defined $wantedChr) {
-            #Clean up the database, commit & close any cursors, free memory;
-            $self->db->cleanUp();
-            undef $cursor;
+            $self->log('fatal', $err);
+            die $err;
+          }
 
+          if($wantedChr) {
+            #Clean up the database, free memory;
+            $self->db->cleanUp($wantedChr);
             #Reset our transaction counter
             $count = 0;
-
-            if(@caddData || defined $caddRef) {
-              my $err = $self->name . ": changed chromosomes, but unwritten data remained";
-
-              $self->log('fatal', $err);
-            }
           }
 
           # Completion meta checks to see whether this track is already recorded
           # as complete for the chromosome, for this track
-          $wantedChr = $self->chrWantedAndIncomplete($chr);
+          $wantedChr = $self->chrIsWanted($chr) && $self->completionMeta->okToBuild($chr) ? $chr : undef;
           undef @caddData;
           undef $caddRef;
         }
 
         # We expect either one chr per file, or all in one file
         # However, chr-split CADD files may have multiple chromosomes after liftover
-        # TODO: rethink chrPerFile handling
-        if(!defined $wantedChr) {
+        if(!$wantedChr) {
+          # So we require sorted_guranteed flag for "last" optimization
+          if($self->chrPerFile) {
+            $self->log('info', $self->name . ": chrs in file $file not wanted or previously completed. Skipping");
+
+            last FH_LOOP;
+          }
+
           next FH_LOOP;
         }
 
@@ -268,6 +246,7 @@ sub buildTrack {
             if(@caddData || $caddRef) {
               my $err = $self->name . ": skipSites and score accumulation should be mutually exclusive";
               $self->log('fatal', $err);
+              die $err;
             }
 
             #Can delete because order guaranteed
@@ -279,17 +258,16 @@ sub buildTrack {
             $self->log('warn', $self->name . ": $wantedChr\:$lastPosition: No scores or warnings accumulated.");
             undef $caddRef;
           } else {
-            $cursor //= $self->db->dbStartCursorTxn($wantedChr);
-
             ########### Check refBase against the assembly's reference #############
-            # We read using our cursor; since in LMDB, cursors are isolated
-            # and therefore don't want to use our helper dbRead class, as inconsistencies may arise
-            $dbData = $self->db->dbReadOneCursorUnsafe($cursor, $lastPosition);
+            #last argument to skip commit of read
+            #We can read without committing, no real benefit to committing here
+            $dbData = $self->db->dbReadOne($wantedChr, $lastPosition, 1);
             $assemblyRefBase = $refTrack->get($dbData);
 
             if(!defined $assemblyRefBase) {
               my $err = $self->name . ": no assembly ref base found for $wantedChr:$lastPosition";
               $self->log('fatal', $err);
+              die $err;
             }
 
             # When lifted over, reference base is not lifted, can cause mismatch
@@ -324,17 +302,9 @@ sub buildTrack {
 
                 #Since sorting is guaranteed, there is nothing to write here
               } else {
-                #Args:                         $cursor               $chr,       $trackIndex,   $pos,         $trackValue
-                $self->db->dbPatchCursorUnsafe($cursor, $wantedChr, $self->dbName, $lastPosition, $phredScoresAref);
-
-                if($count > $self->commitEvery) {
-                  $self->db->dbEndCursorTxn($wantedChr);
-                  undef $cursor;
-
-                  $count = 0;
-                }
-
-                $count++;
+                #Args:             $chr,       $trackIndex,   $pos,         $trackValue,       $mergeFunc, $skipCommit
+                $self->db->dbPatch($wantedChr, $self->dbName, $lastPosition, $phredScoresAref, undef, $count < $self->commitEvery);
+                $count = $count < $self->commitEvery ? $count + 1 : 0;
 
                 undef $phredScoresAref;
               }
@@ -406,7 +376,7 @@ sub buildTrack {
           next;
         }
 
-        push @caddData, [ $altAllele, $self->{_rounder}->round( $fields[$phastIdx] ) ];
+        push @caddData, [ $altAllele, $rounder->round( $fields[$phastIdx] ) ];
       }
 
       ######################### Finished reading file ##########################
@@ -418,11 +388,6 @@ sub buildTrack {
           die $err;
         }
 
-        if(defined $cursor) {
-          $self->db->dbEndCursorTxn($wantedChr);
-          undef $cursor;
-        }
-
         if (defined $skipSites{"$wantedChr\_$lastPosition"}) {
           $self->log('debug', $self->name . ": $wantedChr\:$lastPosition: " . $skipSites{"$chr\_$lastPosition"} . ". Skipping.");
 
@@ -430,7 +395,8 @@ sub buildTrack {
           delete $skipSites{"$wantedChr\_$lastPosition"};
           #Since sorting is guaranteed, no need to write anything
         } else {
-          $dbData = $self->db->dbReadOne($wantedChr, $lastPosition);
+          #last argument to skip commit of read
+          $dbData = $self->db->dbReadOne($wantedChr, $lastPosition, 1);
           $assemblyRefBase = $refTrack->get($dbData);
 
           if($assemblyRefBase ne $caddRef) {
@@ -452,6 +418,7 @@ sub buildTrack {
               } else {
                 my $err = $self->name . ": $wantedChr\:$lastPosition: Didn't accumulate 3 phredScores, and not because > 3 scores, which should be impossible.";
                 $self->log('fatal', $err);
+                die $err;
               }
             } else {
               #We commit here, because we don't expect any more scores
@@ -466,51 +433,66 @@ sub buildTrack {
       undef $wantedChr;
       undef $phredScoresAref;
 
-      #Commit any remaining transactions, commit & close cursors, sync all environments, free memory
+      #Commit any remaining transactions, sync all environments, free memory
       $self->db->cleanUp();
-      undef $cursor;
 
-      $self->safeCloseBuilderFh($fh, $file, 'fatal');
-
-      if($changedRefPositions > 0) {
-        $self->log('warn', $self->name . ": skipped $changedRefPositions positions because CADD Ref didn't match ours: in $file.");
+       # Since any detected errors are fatal, and we expect 1 chr per file or all in 1 file
+       # we have confidence that anything visited is complete
+      foreach (keys %visitedChrs) {
+        $self->completionMeta->recordCompletion($_);
+        # We don't record $chr completion status per file, but wait until all files read
+        # because CADD files may be tremendously out of order after liftover
+        $self->log('info', $self->name . ": recorded $_ completed");
       }
 
-      if($multiRefPositions > 0) {
-        $self->log('warn', $self->name . ": skipped $multiRefPositions positions because CADD Ref had multiple Ref at that position: in $file.");
-      }
+      if(!close($fh) && $? != 13) {
+        $self->log('fatal', $self->name . " failed to close $file with $! ($?)");
+        die $self->name . ": failed to close $file with $!";
+      } else {
+        if($changedRefPositions > 0) {
+          $self->log('warn', $self->name . ": skipped $changedRefPositions positions because CADD Ref didn't match ours: in $file.");
+        }
 
-      if($multiScorePositions > 0) {
-        $self->log('warn', $self->name . ": skipped $multiScorePositions positions because found multiple scores: in $file");
-      }
+        if($multiRefPositions > 0) {
+          $self->log('warn', $self->name . ": skipped $multiRefPositions positions because CADD Ref had multiple Ref at that position: in $file.");
+        }
 
-      if($nonACTGrefPositions > 0) {
-        $self->log('warn', $self->name . ": skipped $nonACTGrefPositions positions because found non-ACTG CADD Ref: in $file");
-      }
+        if($multiScorePositions > 0) {
+          $self->log('warn', $self->name . ": skipped $multiScorePositions positions because found multiple scores: in $file");
+        }
 
-      if($nonACTGaltPositions > 0) {
-        $self->log('warn', $self->name . ": skipped $nonACTGaltPositions positions because found non-ACTG CADD Alt: in $file");
-      }
+        if($nonACTGrefPositions > 0) {
+          $self->log('warn', $self->name . ": skipped $nonACTGrefPositions positions because found non-ACTG CADD Ref: in $file");
+        }
 
-      if($missingScorePositions > 0) {
-        $self->log('warn', $self->name . ": skipped $missingScorePositions positions because has missing Phred scores: in $file");
-      }
+        if($nonACTGaltPositions > 0) {
+          $self->log('warn', $self->name . ": skipped $nonACTGaltPositions positions because found non-ACTG CADD Alt: in $file");
+        }
 
-    $pm->finish(0, \%visitedChrs);
+        if($missingScorePositions > 0) {
+          $self->log('warn', $self->name . ": skipped $missingScorePositions positions because has missing Phred scores: in $file");
+        }
+
+
+        $self->log('info', $self->name . ": closed $file with $?");
+      }
+    $pm->finish(0);
   }
 
-  $pm->wait_all_children();
+  ######Record completion status only if the process completed unimpeded ########
+  $pm->run_on_finish(sub {
+    my ($pid, $exitCode, $fileName) = @_;
 
-  # Now, regardless of whether chromosomes were sorted, or spread across many files
-  # we can record true completion state
-  for my $chr (keys %completedChrs) {
-    $self->completionMeta->recordCompletion($chr);
+    if($exitCode != 0) {
+      my $err = $self->name . ": failed to build from $fileName: exit code $exitCode";
+      $self->log('fatal', $err);
+      die $err;
+    }
 
-    $self->log('info', $self->name . ": recorded $chr completed, from " . (join(",", @{$completedChrs{$chr}})));
-  }
+    $self->log("info", $self->name . ": completed building from $fileName");
+  });
 
-  #TODO: figure out why this is necessary, even with DEMOLISH
-  $self->db->cleanUp();
+  $pm->wait_all_children;
 
   #TODO: Implement actual error return codes instead of dying
   return;
@@ -541,11 +523,13 @@ sub _accumulateScores {
       my $err = $_[0]->name . ": $_[1]\:$_[4]: no score possible for altAllele $aref->[0]";
       #      $self->log
       $_[0]->log('fatal', $err);
+      die $err;
     }
 
     $phredScores[$index] = $aref->[1];
   }
 
+  # There is no way to get here and not have accumulated 3 scores
   return \@phredScores;
 }
 
