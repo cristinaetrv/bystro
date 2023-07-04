@@ -19,7 +19,7 @@ use Seq::Tracks::Build::LocalFilesPaths;
 use DDP;
 use List::Util qw/uniq/;
 
-# Exports: _localFilesDir, _decodedConfig, compress, _wantedTrack, _setConfig, logPath, use_absolute_path
+# # _localFilesDir, _decodedConfig, compress, _wantedTrack, _setConfig, and logPath
 extends 'Utils::Base';
 
 # ########## Arguments accepted ##############
@@ -266,7 +266,9 @@ sub go {
 
   $pm->wait_all_children();
 
-  $self->_backupAndWriteConfig();
+  $self->_backupAndWriteConfig('refGeneXdbnsfp');
+
+  $self->log('info', 'Finished RefGeneXdbnsfp');
 }
 
 __PACKAGE__->meta->make_immutable;

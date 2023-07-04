@@ -69,7 +69,7 @@ sub go {
   $self->_wantedTrack->{name} = $self->renameTo;
 
   #TODO: support renaming for the other fields
-  if(defined $self->_decodedConfig->{statistics} && defined $self->_decodedConfig->{statistics}{dbSNPnameField}) {
+  if(defined $self->_decodedConfig->{statistics} && $self->_decodedConfig->{statistics}{dbSNPnameField}) {
     if($self->_decodedConfig->{statistics}{dbSNPnameField} eq $self->name) {
       $self->_decodedConfig->{statistics}{dbSNPnameField} = $self->renameTo;
     }
@@ -88,10 +88,8 @@ sub go {
   if(-e path($self->_decodedConfig->{database_dir})->child($self->name . '_meta') ) {
     $metaPath->move( path( $self->_decodedConfig->{database_dir} )->child($self->renameTo . '_meta') );
   }
-
-  $self->_wantedTrack->{renameTrack_date} = $self->_dateOfRun;
   
-  $self->_backupAndWriteConfig();
+  $self->_backupAndWriteConfig('renameTrack');
 }
 
 __PACKAGE__->meta->make_immutable;
