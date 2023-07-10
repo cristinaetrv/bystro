@@ -41,12 +41,12 @@ has output_file_base => (
   documentation => qq{Where you want your output.},
 );
 
-has output_json => (
+has output_msgpack => (
   is          => 'ro',
   isa         => 'Bool',
-  cmd_aliases   => [qw/json/],
+  cmd_aliases   => [qw/msgpack/],
   metaclass => 'Getopt',
-  documentation => qq{Do you want to output JSON instead? Incompatible with run_statistics},
+  documentation => qq{Do you want to output msgpack instead? Incompatible with run_statistics},
 );
 
 has config => (
@@ -198,11 +198,11 @@ sub annotate {
     $args->{maxThreads} = $self->maxThreads;
   }
 
-  if(defined $self->output_json) {
-    $args->{outputJson} = $self->output_json;
+  if(defined $self->output_msgpack) {
+    $args->{outputMsgpack} = $self->output_msgpack;
 
     if($self->run_statistics) {
-      say STDERR "--output_json incompatible with --run_statistics 1";
+      say STDERR "--output_msgpack incompatible with --run_statistics 1";
       exit(1);
     }
   }

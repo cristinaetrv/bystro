@@ -31,7 +31,7 @@ with 'Seq::Output::Fields';
 # output_file_base contains the absolute path to a file base name
 # Ex: /dir/child/BaseName ; BaseName is appended with .annotated.tsv , .annotated-log.txt, etc
 # for the various outputs
-has output_file_base => ( is => 'ro', isa => AbsPath, coerce => 1, required => 1,
+has output_file_base => ( is => 'ro', isa => AbsPath, coerce => 1,
   handles => { outDir => 'parent', outBaseName => 'basename' });
 
 ############################### Optional #####################################
@@ -57,7 +57,7 @@ has maxThreads => (is => 'ro', isa => 'Int', lazy => 1, default => sub {
   return Sys::CpuAffinity::getNumCpus();
 });
 
-has outputJson => (is => 'ro', isa => 'Bool', default => 0);
+has outputMsgpack => (is => 'ro', isa => 'Bool', default => 0);
 
 # has badSamplesField => (is => 'ro', default => 'badSamples', lazy => 1);
 
@@ -73,6 +73,10 @@ has outputJson => (is => 'ro', isa => 'Bool', default => 0);
 has outputFilesInfo => (is => 'ro', isa => 'HashRef', init_arg => undef, lazy => 1, default => sub {
   my $self = shift;
 
+  if(!$self->outBaseName) {
+    return {};
+  }
+
   my %out;
 
   $out{log} = path($self->logPath)->basename;
@@ -80,7 +84,7 @@ has outputFilesInfo => (is => 'ro', isa => 'HashRef', init_arg => undef, lazy =>
   # Must be lazy in order to allow "revealing module pattern", with output_file_base below
   my $outBaseName = $self->outBaseName;
   
-  my $extension = $self->outputJson ? 'json' : 'tsv';
+  my $extension = 'tsv';
 
   $out{annotation} = $outBaseName . ".annotation.$extension" . ($self->compress ? "." . $self->compressType : "");
   $out{header} = $outBaseName . ".annotation.header.json";

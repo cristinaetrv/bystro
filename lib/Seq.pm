@@ -14,6 +14,7 @@ use Types::Path::Tiny qw/AbsFile/;
 
 use namespace::autoclean;
 
+use Data::MessagePack;
 use MCE::Loop;
 
 use Seq::InputFile;
@@ -26,6 +27,8 @@ use Path::Tiny;
 use Scalar::Util qw/looks_like_number/;
 
 extends 'Seq::Base';
+
+my $mp = Data::MessagePack->new()->prefer_integer()->prefer_float32();
 
 # We  add a few of our own annotation attributes
 # These will be re-used in the body of the annotation processor below
@@ -110,12 +113,12 @@ sub annotateFile {
   say $headerFh encode_json($finalHeader->getOrderedHeader());
   my $outputHeader = $finalHeader->getString();
 
-  if(!$self->outputJson) {
+  if(!$self->outputMsgpack) {
     say $outFh $outputHeader;
-  }
-  
-  if($statsFh) {
-    say $statsFh $outputHeader;
+
+    if($statsFh) {
+      say $statsFh $outputHeader;
+    }
   }
 
   ######################## Build the fork pool #################################
@@ -154,14 +157,6 @@ sub annotateFile {
   # Meaning, we can skip anything forwarded from the pre-processor
   
   my $outputter = Seq::Output->new({header => $finalHeader, trackOutIndices => \@allOutIndices});
-  # my $outputFn;
-  # if($self->outputJson) {
-  #   $outputFn = \&encode_json;
-  # } else {
-  #   my $outputter = Seq::Output->new({header => $finalHeader, trackOutIndices => \@allOutIndices});
-  #   $outputFn = \$outputter->makeOutputString;
-  # }
-
 
   ###### Processes pre-processor output passed from file reader/producer #######
   my $refTrackOutIdx = $outIndicesMap->{$refTrackGetter->name};
@@ -169,11 +164,7 @@ sub annotateFile {
   my %wantedChromosomes = %{ $refTrackGetter->chromosomes };
   my $maxDel            = $self->maxDel;
 
-  #Accessors are amazingly slow; it takes as long to call ->name as track->get
-  #after accounting for the nubmer of calls to ->name
-  # my @trackNames = map { $_->name } @{$self->_tracks};
-
-  my $outJson = $self->outputJson;
+  my $outputMsgpack = $self->outputMsgpack;
 
   # TODO: don't annotate MT (GRCh37) if MT not explicitly specified
   # to avoid issues between GRCh37 and hg19 chrM vs MT
@@ -203,7 +194,6 @@ sub annotateFile {
     # Each line is expected to be
     # chrom \t pos \t type \t inputRef \t alt \t hets \t homozygotes \n
     # the chrom is always in ucsc form, chr (the golang program guarantees it)
-    my $outputJson = $self->outputJson;
     while (my $line = $MEM_FH->getline()) {
       chomp $line;
 
@@ -312,8 +302,8 @@ sub annotateFile {
     close $MEM_FH;
 
     if(@lines) {
-      if($outJson) {
-        MCE->gather(scalar @lines, $total - @lines, undef, encode_json(\@lines));
+      if($outputMsgpack) {
+        MCE->gather(scalar @lines, $total - @lines, undef, $mp->pack(\@lines));
       } else {
         MCE->gather(scalar @lines, $total - @lines, undef, $outputter->makeOutputString(\@lines));
       }
@@ -349,9 +339,9 @@ sub annotateFile {
           ||
           ($statsFh && $self->safeClose($statsFh))
           ||
-          $self->safeSystem('sync')
-          ||
-          $self->_moveFilesToOutputDir();
+          $self->safeSystem('sync');
+
+  if
 
   if($err) {
     $self->_errorWithCleanup($err);
@@ -376,6 +366,36 @@ sub makeLogProgressAndPrint {
 
   if ( !$throttleThreshold ) {
     $throttleThreshold = 1e4;
+  }
+
+  if ($self->outputMsgpack) {
+    return sub {
+        #<Int>$annotatedCount, <Int>$skipCount, <Str>$err, <Bin>MsgpackData, <Bool> $forcePublish = @_;
+      ##    $_[0],          $_[1]           , $_[2],     $_[3].           , $_[4]
+      if ( $_[2] ) {
+        $$abortErrRef = $_[2];
+        return;
+      }
+
+      if ($publish) {
+        $thresholdAnn     += $_[0];
+        $thresholdSkipped += $_[1];
+
+        if ( $_[4] || $thresholdAnn + $thresholdSkipped >= $throttleThreshold ) {
+          $totalAnnotated += $thresholdAnn;
+          $totalSkipped   += $thresholdSkipped;
+
+          $self->publishProgress( $totalAnnotated, $totalSkipped );
+
+          $thresholdAnn     = 0;
+          $thresholdSkipped = 0;
+        }
+      }
+
+      if ( $_[3] ) {
+        print $outFh $_[3];
+      }
+    }
   }
   return sub {
     #<Int>$annotatedCount, <Int>$skipCount, <Str>$err, <Str>$outputLines, <Bool> $forcePublish = @_;
@@ -511,13 +531,8 @@ sub _getFinalHeader {
   # idx 5: variable: anything the preprocessor provides
   my $numberSplitFields;
   my @headerFields;
-  if($self->outputJson) {
-    @headerFields = split('\t', $header);
-    $numberSplitFields = @headerFields;
-  } else {
-    $numberSplitFields = 5 + 1;
-    @headerFields = split('\t', $header, $numberSplitFields);
-  }
+  $numberSplitFields = 5 + 1;
+  @headerFields = split('\t', $header, $numberSplitFields);
 
   # Our header class checks the name of each feature
   # It may be, more than likely, that the pre-processor names the 4th column 'ref'
